@@ -1,3 +1,8 @@
+0.2.1
+- StaticObjects can have music
+- Additional docstrings
+- Added an example of inserting your own code for events
+
 0.2
 - Added Music! (early stages, only on Windows for now :/ )
 - Bug fix

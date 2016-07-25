@@ -1,11 +1,11 @@
 # coding=utf-8
 """
-This is an example of what can the interpreter do. Not everything is covered, but most for the 0.2 version is.
+This is an example of what can the interpreter do. Not everything is covered, but most for the 0.2.1 version is.
 
 It all works like this:
 
 Create rooms, items, static objects and link them together.
-Add requirements, custom messages, blueprints, ...
+Add requirements, custom messages, blueprints, music ...
 and use start() method to start the "Adventure", the rest is left to the TextInterface
 """
 
@@ -87,8 +87,11 @@ static1 = pac.createStaticItem(
 room5.addItemRequirement(item3, "I need to charge my phone before I embark.")  # room5 = street
 room5.addVisitRequirement(room4, "I must visit the park first.")
 
-# pac.addMusic("somemusic.wav", room2)  # winsound sadly supports only wav.
 # Add your music!
+
+# pac.addMusic("DemoMusic2.wav", room3)  # winsound sadly supports only wav file format.
+
+# pac.addMusic("DemoMusic.wav", static1)  # Music can be added to either Room or StaticObject objects
 
 #object1.addUseRequirement(object2)  # Commented out, but this pretty much means that you need to have that item (item2 - charger) before you can pick it up/use it (item1 - phone)
 #object1.addPickUpRequirement(object2)
@@ -102,7 +105,7 @@ pac.setDefaultCombineFailMessage("Can't do that...")
 
 pac.createBlueprint(item1, item2, item3) # phone + charger = charged phone (item names can also be used as args)
 
-pac.linkroom(room1, room2, True)  # True indicates that the path should be two-way
+pac.linkroom(room1, room2, twoway=True)  # True indicates that the path should be two-way
 
 pac.linkroom(room2, room3, True)
 
@@ -116,7 +119,7 @@ pac.putitem(room2, item2, "Your charger is in the half-open drawer.")
 pac.putitem(room2, item4, "The remote is on the table.")
 
 pac.putstaticobject(room2, static1)  # Description is not needed, it's the static objects display parameter
-static1.addItemBlueprint(item4, "You use the remote to turn on the television.")
+static1.addItemBlueprint(item4, "You turn on the television with the remote.")
 
 pac.setStartingMessage("'The Story of a Man' (demo)\n---------------------------\n\nYou are in the dining room. You can smell the scent of washed dishes.\nYour family is out for this evening.")
 

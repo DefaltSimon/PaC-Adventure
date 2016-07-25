@@ -9,7 +9,7 @@ import time
 import os
 
 __author__ = "DefaltSimon"
-__version__ = "0.2"
+__version__ = "0.2.1"
 
 # For simple threading
 
@@ -54,25 +54,49 @@ class AlreadyExists(Exception):
 
 # Music player
 class Music:
+    """
+    Represents the Music that is played when entering a room or interacting with an object.
+    """
     def __init__(self, path):
+        """
+        Inits the Music.
+        :param path: path to file
+        :return: None
+        """
         if not os.path.isfile(path):
-                raise FileNotFoundError
+            print("[ERROR] {} is not a file or does not exist!".format(path))
 
         self.path = str(path)
         self._keepalive = threading.Event()
         self.isstarted = False
 
     @threaded
-    def start(self):
+    def start(self, repeat=True):
+        """
+        Starts playing the music (creates a thread).
+        :param repeat: optional, defaults to True; specifies if the sound file should be repeatedly played.
+        :return: None
+        """
+
         while not self._keepalive.isSet():
-            if not self.isstarted:
-                winsound.PlaySound(self.path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+
+            if repeat:
+                if not self.isstarted:
+                    winsound.PlaySound(self.path, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_LOOP | winsound.SND_NODEFAULT)
+            else:
+                if not self.isstarted:
+                    winsound.PlaySound(self.path, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+
             self.isstarted = True
             time.sleep(0.1)
 
-        return
+        return  # Quits the thread when Event is set to True
 
     def stop(self):
+        """
+        Sets a flag (Event) to True so the thread quits on next iteration (max time for next iteration: 0.1 s)
+        :return: None
+        """
         self._keepalive.set()
 
 # Room Object
@@ -141,7 +165,6 @@ class Room(object):
     def enter(self):
         """
         :return: Room description, includes 'first enter description' if it is the first time entering the room. Also includes any items found in the room.
-        If music is set, plays the music.
         """
 
         # Build item descriptions if they exists (if there are any items in the room)
@@ -318,6 +341,8 @@ class Item(object):
         self.desc = str(desc)
 
         self.used = False
+        self.pickedup = False
+        self.crafted = False
 
         self.onuse = str(onuse)
         self.onpickup = onpickup
@@ -359,6 +384,8 @@ class Item(object):
         :return: Item onpickup string
         """
         # Must use hasPickUpRequirements!
+        self.pickedup = True
+
         return self.onpickup
 
     def craft(self):
@@ -366,6 +393,7 @@ class Item(object):
             return False
 
         else:
+            self.crafted = True
             return self.crafttingdesc
 
     def hasPickUpRequirements(self, items):
@@ -438,6 +466,8 @@ class StaticObject(object):
         self.itemrequirements = []
 
         self.itemblueprints = {}
+
+        self.music = None
 
     def wasused(self):
         """
@@ -516,6 +546,18 @@ class StaticObject(object):
             raise InvalidParameters
 
         self.itemblueprints[item.name] = str(descrption)
+
+    def addMusic(self, music):
+        """
+        Adds a Music object that will start playing when the player enters.
+        :param music: path or Music
+        :return: None
+        """
+
+        if not isinstance(music, Music):
+            raise InvalidParameters
+
+        self.music = music
 
 
 
@@ -810,7 +852,7 @@ class TextInterface:
         while True:
             textadventure()
 
-        # Code never reaches this point... probably
+        # Code never reaches this point... probably (except when quitting)
 
 # Main class
 class PaCInterpreter:
@@ -862,6 +904,10 @@ class PaCInterpreter:
 
         # Instances the TextInterface class (no need for it to be class-wide for now)
         textinterface = TextInterface()
+
+        # If the starting room has music, start playing.
+        if self.startingroom.music:
+            self._startMusicThread(self.startingroom.music)
 
         # With this the TextInterface has the access to the class - the 'story'. Prints the starting message and begins the while True loop.
         textinterface.beginAdventure(self)
@@ -1241,8 +1287,12 @@ class PaCInterpreter:
                     return self.defaultfaileduse
 
             if not item:
+                if obj.music:
+                    self._startMusicThread(obj.music)
                 desc = obj.use()
             else:
+                if obj.music:
+                    self._startMusicThread(obj.music)
                 desc = obj.useWithItem(item)
 
             return desc
@@ -1320,7 +1370,6 @@ class PaCInterpreter:
         Returns a list of links (ways/paths) from the current room.
         :return - list of links
         """
-
         room = self.currentroom
 
         if not room or not isinstance(room, Room):
@@ -1331,11 +1380,11 @@ class PaCInterpreter:
         except KeyError:
             return []
 
-    def addMusic(self, music, room):
+    def addMusic(self, music, place):
         """
-        Adds music to be played when entering a room. Music does NOT stop playing when moving to a room without music!
+        Adds music to be played when entering a room or interacting with a StaticObject. Music does NOT stop playing when moving to a room without music!
         :param music: str or Music
-        :param room: Room
+        :param place: Room or StaticObject
         :return: None
         """
         if isinstance(music, str):
@@ -1347,9 +1396,12 @@ class PaCInterpreter:
         else:
             raise InvalidParameters
 
-        room.addMusic(music)
+        if not (isinstance(place, Room) or isinstance(place, StaticObject)):
+            raise InvalidParameters
 
-    def _startMusicThread(self, music):
+        place.addMusic(music)
+
+    def _startMusicThread(self, music, repeat=True):
         """
         Starts the music, stopping any existing threads.
         :param music: Music
@@ -1366,4 +1418,4 @@ class PaCInterpreter:
         self.musicthread = music
         self.lastmusicthread = music
         self.musicthread.__init__(self.musicthread.path)
-        self.musicthread.start()
+        self.musicthread.start(repeat)

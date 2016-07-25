@@ -19,3 +19,6 @@ Pac Adventure "library" is based on this concept:
 1. Create rooms, items, static objects and link them together.
 2. Add requirements, custom messages, blueprints, music, ...
 3. then use start() method to start the "Adventure", the rest is left to the TextInterface
+
+---
+For examples and demos see the 'examples' folder
