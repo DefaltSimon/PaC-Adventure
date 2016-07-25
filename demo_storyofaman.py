@@ -1,6 +1,6 @@
 # coding=utf-8
 """
-This is an example of what can the interpreter do. Not everything is covered, but most for the 0.1alpha version is.
+This is an example of what can the interpreter do. Not everything is covered, but most for the 0.2 version is.
 
 It all works like this:
 
@@ -86,6 +86,9 @@ static1 = pac.createStaticItem(
 
 room5.addItemRequirement(item3, "I need to charge my phone before I embark.")  # room5 = street
 room5.addVisitRequirement(room4, "I must visit the park first.")
+
+# pac.addMusic("somemusic.wav", room2)  # winsound sadly supports only wav.
+# Add your music!
 
 #object1.addUseRequirement(object2)  # Commented out, but this pretty much means that you need to have that item (item2 - charger) before you can pick it up/use it (item1 - phone)
 #object1.addPickUpRequirement(object2)

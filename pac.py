@@ -2,8 +2,21 @@
 
 # This is the PaC Interpreter
 
+# Imports
+import winsound  # Only for Windows!
+import threading
+import time
+import os
+
 __author__ = "DefaltSimon"
-__version__ = "0.1"
+__version__ = "0.2"
+
+# For simple threading
+
+def threaded(fn):
+    def wrapper(*args, **kwargs):
+        threading.Thread(target=fn, args=args, kwargs=kwargs).start()
+    return wrapper
 
 # Exception classes
 
@@ -39,6 +52,29 @@ class AlreadyExists(Exception):
     def __init__(self, *args, **kwargs):
         pass
 
+# Music player
+class Music:
+    def __init__(self, path):
+        if not os.path.isfile(path):
+                raise FileNotFoundError
+
+        self.path = str(path)
+        self._keepalive = threading.Event()
+        self.isstarted = False
+
+    @threaded
+    def start(self):
+        while not self._keepalive.isSet():
+            if not self.isstarted:
+                winsound.PlaySound(self.path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            self.isstarted = True
+            time.sleep(0.1)
+
+        return
+
+    def stop(self):
+        self._keepalive.set()
+
 # Room Object
 
 
@@ -65,6 +101,7 @@ class Room(object):
             "items" : [],
             "visited" : [],
         }
+        self.music = None
 
     def description(self):
         """
@@ -104,6 +141,7 @@ class Room(object):
     def enter(self):
         """
         :return: Room description, includes 'first enter description' if it is the first time entering the room. Also includes any items found in the room.
+        If music is set, plays the music.
         """
 
         # Build item descriptions if they exists (if there are any items in the room)
@@ -255,6 +293,19 @@ class Room(object):
                 return "\n".join(ls)
 
         return 1
+
+    def addMusic(self, music):
+        """
+        Adds a Music object that will start playing when the player enters.
+        :param music: path or Music
+        :return: None
+        """
+
+        if not isinstance(music, Music):
+            raise InvalidParameters
+
+        self.music = music
+
 # Item in the room or inventory
 
 
@@ -541,7 +592,10 @@ class TextInterface:
             # Moves the player back to the previous room.
             elif inp.startswith("go back"):
 
-                insert = str(pac.roombeforethisone.name)  # Stores room before calling goback() method where the room gets changed
+                try:
+                    insert = str(pac.roombeforethisone.name)  # Stores room before calling goback() method where the room gets changed
+                except AttributeError:
+                    return
 
                 try:
                     desc = pac.goback()
@@ -789,6 +843,8 @@ class PaCInterpreter:
         self.defaultfaileduse = "Hmm..."
         self.defaultfailedpickup = "I can't do that."
         self.defaultfailedcombine = "Can't do that..."
+
+        self.musicthread = None
 
     def start(self):
         """
@@ -1208,6 +1264,10 @@ class PaCInterpreter:
             except KeyError:
                 raise NotImplementedError
 
+        if room.music:
+            if not self.musicthread == room.music:
+                self._startMusicThread(room.music)
+
         try:
             if not room.name in self.links[self.currentroom.name]:
                 raise NotLinked
@@ -1271,9 +1331,39 @@ class PaCInterpreter:
         except KeyError:
             return []
 
-    class Music:  # TODO just an idea
-        def __init__(self, path):
+    def addMusic(self, music, room):
+        """
+        Adds music to be played when entering a room. Music does NOT stop playing when moving to a room without music!
+        :param music: str or Music
+        :param room: Room
+        :return: None
+        """
+        if isinstance(music, str):
+            music = Music(music)
+
+        elif isinstance(music, Music):
             pass
 
-        def play(self):
+        else:
+            raise InvalidParameters
+
+        room.addMusic(music)
+
+    def _startMusicThread(self, music):
+        """
+        Starts the music, stopping any existing threads.
+        :param music: Music
+        :return: None
+        """
+        if not isinstance(music, Music):
+            raise InvalidParameters
+
+        try:
+            self.musicthread.stop()
+        except AttributeError:
             pass
+
+        self.musicthread = music
+        self.lastmusicthread = music
+        self.musicthread.__init__(self.musicthread.path)
+        self.musicthread.start()
