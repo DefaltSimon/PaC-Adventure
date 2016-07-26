@@ -7,6 +7,7 @@ A library for creating a text-based story.
 - Inventory, "crafting" (called blueprints)
 - Requirements before specific actions can be done  
 - Walking ;)  
+- Event handling  
 - Music!  
 
 More coming in the future!  

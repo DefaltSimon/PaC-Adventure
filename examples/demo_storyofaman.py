@@ -6,7 +6,10 @@ It all works like this:
 
 Create rooms, items, static objects and link them together.
 Add requirements, custom messages, blueprints, music ...
+register events,
 and use start() method to start the "Adventure", the rest is left to the TextInterface
+
+For more advanced examples see customevents.py
 """
 
 # Interpreter import
@@ -89,9 +92,9 @@ room5.addVisitRequirement(room4, "I must visit the park first.")
 
 # Add your music!
 
-# pac.addMusic("DemoMusic2.wav", room3)  # winsound sadly supports only wav file format.
+# pac.addMusic("DemoMusic2.wav", room3)  # Supported file formats: mp3, ogg, wav, mid
 
-# pac.addMusic("DemoMusic.wav", static1)  # Music can be added to either Room or StaticObject objects
+# pac.addMusic("DemoMusic.wav", room2)  # Music can be added to either Room or StaticObject objects
 
 #object1.addUseRequirement(object2)  # Commented out, but this pretty much means that you need to have that item (item2 - charger) before you can pick it up/use it (item1 - phone)
 #object1.addPickUpRequirement(object2)
@@ -123,5 +126,5 @@ static1.addItemBlueprint(item4, "You turn on the television with the remote.")
 
 pac.setStartingMessage("'The Story of a Man' (demo)\n---------------------------\n\nYou are in the dining room. You can smell the scent of washed dishes.\nYour family is out for this evening.")
 
-# Starts the game
+# Starts the game (blocking call)
 pac.start()

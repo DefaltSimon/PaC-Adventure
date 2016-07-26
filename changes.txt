@@ -1,3 +1,8 @@
+0.3
+- EventDispatcher added for easy event handling
+- New dependency: pygame (for music)
+- supported music file types: mp3, ogg, wav, mid
+
 0.2.1
 - StaticObjects can have music
 - Additional docstrings

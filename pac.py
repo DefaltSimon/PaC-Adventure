@@ -3,13 +3,23 @@
 # This is the PaC Interpreter
 
 # Imports
-import winsound  # Only for Windows!
+from pygame import mixer
 import threading
 import time
 import os
 
 __author__ = "DefaltSimon"
-__version__ = "0.2.1"
+__version__ = "0.3"
+
+# Constants
+PICKUP = "pickup"
+USE_ITEM = "use-item"
+USE_OBJECT = "use-object"
+COMBINE = "combine"
+START = "start"
+ENTER = "enter"
+MUSIC_CHANGE = "music"
+
 
 # For simple threading
 
@@ -70,34 +80,29 @@ class Music:
         self._keepalive = threading.Event()
         self.isstarted = False
 
-    @threaded
     def start(self, repeat=True):
         """
-        Starts playing the music (creates a thread).
+        Starts playing the music (threading is now not needed).
         :param repeat: optional, defaults to True; specifies if the sound file should be repeatedly played.
         :return: None
         """
+        if repeat:
+            mixer.music.load(self.path)
+            mixer.music.play(-1)
+        else:
+            mixer.music.load(self.path)
+            mixer.music.play()
 
-        while not self._keepalive.isSet():
+        time.sleep(0.1)
 
-            if repeat:
-                if not self.isstarted:
-                    winsound.PlaySound(self.path, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_LOOP | winsound.SND_NODEFAULT)
-            else:
-                if not self.isstarted:
-                    winsound.PlaySound(self.path, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
-
-            self.isstarted = True
-            time.sleep(0.1)
-
-        return  # Quits the thread when Event is set to True
 
     def stop(self):
         """
         Sets a flag (Event) to True so the thread quits on next iteration (max time for next iteration: 0.1 s)
         :return: None
         """
-        self._keepalive.set()
+        mixer.music.fadeout(500)  # Quits the thread when Event is set to True
+        return
 
 # Room Object
 
@@ -113,7 +118,7 @@ class Room(object):
         self.onfirstenterdesc = enterdesc
 
         self.isdefault = bool(starting)
-        self.beenhere = False
+        self.firstenter = False
 
         self.items = {}
         self.itemdescs = {}
@@ -179,8 +184,8 @@ class Room(object):
         else:
             statics = ""
 
-        if not self.beenhere:
-            self.beenhere = True
+        if not self.firstenter:
+            self.firstenter = True
 
             if self.onfirstenterdesc:
                 return str(self.onfirstenterdesc + statics + "\n" + self.desc + itms)
@@ -560,6 +565,49 @@ class StaticObject(object):
         self.music = music
 
 
+class EventDispatcher:
+        # todo docstrings
+        def __init__(self):
+            self.events = {
+                "pickup" : [],
+                "use-item" : [],
+                "use-object" : [],
+                "start" : [],
+                "combine" : [],
+                "enter" : [],
+                "music": []
+            }
+
+        def registerEvent(self, type, fn):
+            if type == PICKUP:
+                self.events.get(PICKUP).append(fn)
+
+            elif type == USE_ITEM:
+                self.events.get(USE_ITEM).append(fn)
+
+            elif type == USE_OBJECT:
+                self.events.get(USE_OBJECT).append(fn)
+
+            elif type == START:
+                self.events.get(START).append(fn)
+
+            elif type == COMBINE:
+                self.events.get(COMBINE).append(fn)
+
+            elif type == ENTER:
+                self.events.get(ENTER).append(fn)
+
+            elif type == MUSIC_CHANGE:
+                self.events.get(MUSIC_CHANGE).append(fn)
+
+        def dispatchEvent(self, type, data=None):
+            for fn in self.events.get(type):
+
+                if not data:
+                    fn()
+
+                else:
+                    fn(data)
 
 # TextInterface handles player interaction
 
@@ -568,7 +616,7 @@ class TextInterface:
     The basic Text interface that the player interacts with.
     """
     def __init__(self):
-        pass
+        self.running = True
 
     def beginAdventure(self, pac):
         """
@@ -840,7 +888,9 @@ class TextInterface:
 
                 if str(n).lower().startswith(("yes", "yup", "ye", "sure", "y")):
                     print("Bye for now!")
-                    exit(0)
+                    self.running = False
+                    return
+
                 elif str(n).lower().startswith(("no", "nope", "n", "not sure")):
                     return
 
@@ -849,7 +899,7 @@ class TextInterface:
 
         print(pac.startingmessage + "\n\n" + getRoomHeader(pac.startingroom.name) + "\n" + pac.startingroom.enter())
 
-        while True:
+        while self.running:  # Defaults to True
             textadventure()
 
         # Code never reaches this point... probably (except when quitting)
@@ -861,7 +911,7 @@ class PaCInterpreter:
     PaC stands for point and click (adventure) ;)
     """
 
-    def __init__(self):
+    def __init__(self, eventdispatcher=None):
         self.rooms = {}
         self.items = {}
         self.statics = {}
@@ -887,13 +937,32 @@ class PaCInterpreter:
         self.defaultfailedcombine = "Can't do that..."
 
         self.musicthread = None
+        self.events = eventdispatcher
+
+    def setEventDispatcher(self, eventdispatcher):
+        """
+        Associates the instance of EventDispatcher with PacInterpreter
+        :param eventdispatcher: an instance of EventDispatcher (optional)
+        :return: None
+        """
+        if not isinstance(eventdispatcher, EventDispatcher):
+            raise InvalidParameters
+
+        self.events = eventdispatcher
 
     def start(self):
         """
         Starts the adventure with you in the default room and the starting message. If you have not defined a starting room or message, MissingParameters will be raised.
-        :return: starting message (to be printed)
+        :return: None
         """
         self.running = True
+
+        mixer.init()  # Inits the mixer module (for Music)
+
+        if not self.events:
+            self.events = EventDispatcher()
+
+        self.events.dispatchEvent(START)
 
         if not self.startingroom or not self.startingmessage:
             raise MissingParameters
@@ -1142,6 +1211,9 @@ class PaCInterpreter:
 
                 self.putIntoInv(result)
 
+                # Dispatch event
+                self.events.dispatchEvent(COMBINE, {"item1": item1, "item2": item2, "result": result})
+
                 return result.craft()
 
         return False
@@ -1236,6 +1308,7 @@ class PaCInterpreter:
                 return self.defaultfailedpickup
 
         it = self.currentroom.pickUpItem(item)
+        self.events.dispatchEvent(PICKUP, {"item": item, "desc": it})
 
         thatitem = self.items[item.name]
         self.putIntoInv(thatitem)
@@ -1263,6 +1336,7 @@ class PaCInterpreter:
                     return self.defaultfaileduse
 
             desc = item.use()
+            self.events.dispatchEvent(USE_ITEM, {"item": item, "desc": desc})
             return desc
 
     def useStaticObject(self, obj, item=None):
@@ -1295,6 +1369,7 @@ class PaCInterpreter:
                     self._startMusicThread(obj.music)
                 desc = obj.useWithItem(item)
 
+            self.events.dispatchEvent(USE_OBJECT, {"object": obj, "desc": desc})
             return desc
 
     def walk(self, room):
@@ -1331,6 +1406,9 @@ class PaCInterpreter:
         # Processes requirements
         itemr = room.hasItemRequirements(self.inv)
         roomr = room.hasVisitRequirement(self.visits)
+
+        if itemr or roomr:
+            self.events.dispatchEvent(ENTER, {"from": self.currentroom, "to": room, "first-time": not room.firstenter})
 
         if itemr == 1:
             if roomr == 1:  # Only if everything is fulfilled, return room description
@@ -1401,6 +1479,7 @@ class PaCInterpreter:
 
         place.addMusic(music)
 
+    @threaded
     def _startMusicThread(self, music, repeat=True):
         """
         Starts the music, stopping any existing threads.
@@ -1418,4 +1497,6 @@ class PaCInterpreter:
         self.musicthread = music
         self.lastmusicthread = music
         self.musicthread.__init__(self.musicthread.path)
+
+        self.events.dispatchEvent(MUSIC_CHANGE, {"music": music, "path": music.path})
         self.musicthread.start(repeat)
