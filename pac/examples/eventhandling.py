@@ -6,7 +6,7 @@ This one focuses on inserting your code into events that happen in the game.
 
 # Interpreter import
 from pac import PaCInterpreter, EventDispatcher
-from pac import PICKUP, COMBINE, START, ENTER, USE_ITEM, USE_OBJECT, MUSIC_CHANGE  # All available events (for now)
+
 
 # Instance of the interpreter
 pac = PaCInterpreter()
@@ -40,21 +40,22 @@ pac.setDefaultCombineFailMessage("Can't do that...")
 
 pac.putitem(room1, item1, "There is a phone on the desk.")
 
-pac.setStartingMessage("Custom event handling demo. When you pick up the phone, It will print the current time.\nUsing this, you can insert your code to some extent.")
+pac.setStartingMessage("This example features event registering and handling.\nA custom message will be printed when you walk.")
 
 
 # PaC-Adventure also has an event handling module (implemented in 0.3)
 events = EventDispatcher()
 
+@events.START
 def onstart():
     print("Game has started.")
 
+@events.ENTER
 def onenter(data):
     print("Went from {} to {} (First time: {}).".format(data.get("from").name, data.get("to").name, data.get("first-time")))
 
-events.registerEvent(START, onstart)
-events.registerEvent(ENTER, onenter)
-# etc...
+# Available events: PICKUP, COMBINE, START, ENTER, USE_ITEM, USE_OBJECT, MUSIC_CHANGE
+# events._registerEvent(START, onstart) # Events can also be registered this way, but above with decorators is much more intuitive
 
 pac.setEventDispatcher(events)  # Needs to be done before start() method.
 

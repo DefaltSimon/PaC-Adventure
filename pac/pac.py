@@ -9,7 +9,7 @@ import time
 import os
 
 __author__ = "DefaltSimon"
-__version__ = "0.3"
+__version__ = "0.3.1"
 
 # Constants
 PICKUP = "pickup"
@@ -578,7 +578,7 @@ class EventDispatcher:
                 "music": []
             }
 
-        def registerEvent(self, type, fn):
+        def _registerEvent(self, type, fn):
             if type == PICKUP:
                 self.events.get(PICKUP).append(fn)
 
@@ -600,7 +600,7 @@ class EventDispatcher:
             elif type == MUSIC_CHANGE:
                 self.events.get(MUSIC_CHANGE).append(fn)
 
-        def dispatchEvent(self, type, data=None):
+        def _dispatchEvent(self, type, data=None):
             for fn in self.events.get(type):
 
                 if not data:
@@ -608,6 +608,35 @@ class EventDispatcher:
 
                 else:
                     fn(data)
+
+        # @decorators for fast event registering
+        def ENTER(self, fn):
+            self._registerEvent(ENTER, fn)
+            return fn
+
+        def PICKUP(self, fn):
+            self._registerEvent(PICKUP, fn)
+            return fn
+
+        def USE_ITEM(self, fn):
+            self._registerEvent(USE_ITEM, fn)
+            return fn
+
+        def USE_OBJECT(self, fn):
+            self._registerEvent(USE_OBJECT, fn)
+            return fn
+
+        def COMBINE(self, fn):
+            self._registerEvent(COMBINE, fn)
+            return fn
+
+        def START(self, fn):
+            self._registerEvent(START, fn)
+            return fn
+
+        def MUSIC_CHANGE(self, fn):
+            self._registerEvent(MUSIC_CHANGE, fn)
+            return fn
 
 # TextInterface handles player interaction
 
@@ -962,7 +991,7 @@ class PaCInterpreter:
         if not self.events:
             self.events = EventDispatcher()
 
-        self.events.dispatchEvent(START)
+        self.events._dispatchEvent(START)
 
         if not self.startingroom or not self.startingmessage:
             raise MissingParameters
@@ -1212,7 +1241,7 @@ class PaCInterpreter:
                 self.putIntoInv(result)
 
                 # Dispatch event
-                self.events.dispatchEvent(COMBINE, {"item1": item1, "item2": item2, "result": result})
+                self.events._dispatchEvent(COMBINE, {"item1": item1, "item2": item2, "result": result})
 
                 return result.craft()
 
@@ -1308,7 +1337,7 @@ class PaCInterpreter:
                 return self.defaultfailedpickup
 
         it = self.currentroom.pickUpItem(item)
-        self.events.dispatchEvent(PICKUP, {"item": item, "desc": it})
+        self.events._dispatchEvent(PICKUP, {"item": item, "desc": it})
 
         thatitem = self.items[item.name]
         self.putIntoInv(thatitem)
@@ -1336,7 +1365,7 @@ class PaCInterpreter:
                     return self.defaultfaileduse
 
             desc = item.use()
-            self.events.dispatchEvent(USE_ITEM, {"item": item, "desc": desc})
+            self.events._dispatchEvent(USE_ITEM, {"item": item, "desc": desc})
             return desc
 
     def useStaticObject(self, obj, item=None):
@@ -1369,7 +1398,7 @@ class PaCInterpreter:
                     self._startMusicThread(obj.music)
                 desc = obj.useWithItem(item)
 
-            self.events.dispatchEvent(USE_OBJECT, {"object": obj, "desc": desc})
+            self.events._dispatchEvent(USE_OBJECT, {"object": obj, "desc": desc})
             return desc
 
     def walk(self, room):
@@ -1408,7 +1437,7 @@ class PaCInterpreter:
         roomr = room.hasVisitRequirement(self.visits)
 
         if itemr or roomr:
-            self.events.dispatchEvent(ENTER, {"from": self.currentroom, "to": room, "first-time": not room.firstenter})
+            self.events._dispatchEvent(ENTER, {"from": self.currentroom, "to": room, "first-time": not room.firstenter})
 
         if itemr == 1:
             if roomr == 1:  # Only if everything is fulfilled, return room description
@@ -1498,5 +1527,5 @@ class PaCInterpreter:
         self.lastmusicthread = music
         self.musicthread.__init__(self.musicthread.path)
 
-        self.events.dispatchEvent(MUSIC_CHANGE, {"music": music, "path": music.path})
+        self.events._dispatchEvent(MUSIC_CHANGE, {"music": music, "path": music.path})
         self.musicthread.start(repeat)

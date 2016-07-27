@@ -1,3 +1,7 @@
+0.3.1
+- Decorators for simple event registering added
+- PaC can now be installed as a package
+
 0.3
 - EventDispatcher added for easy event handling
 - New dependency: pygame (for music)
