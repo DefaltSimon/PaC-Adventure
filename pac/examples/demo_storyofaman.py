@@ -1,5 +1,6 @@
 # coding=utf-8
 """
+This is an example of what can the interpreter do. Not everything is covered, but most for the 0.4 version is.
 
 It all works like this:
 
