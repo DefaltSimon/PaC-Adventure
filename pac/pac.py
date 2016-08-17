@@ -1,15 +1,25 @@
 # coding=utf-8
 
 # This is the PaC Interpreter
-
-# Imports
-from pygame import mixer
+import logging
+import pickle
 import threading
 import time
 import os
 
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+
+# Imports
+pygamed = False
+try:
+    from pygame import mixer
+except ImportError:
+    pygamed = True
+    logging.warn("[WARNING] pygame is not installed, music will NOT work.")
+
 __author__ = "DefaltSimon"
-__version__ = "0.3.1"
+__version__ = "0.4"
 
 # Constants
 PICKUP = "pickup"
@@ -27,6 +37,10 @@ def threaded(fn):
     def wrapper(*args, **kwargs):
         threading.Thread(target=fn, args=args, kwargs=kwargs).start()
     return wrapper
+
+def save(fn):
+    fn.__self__.save.save(fn.__self__.currentroom, fn.__self__.roombeforethisone, fn.__self__.inv)
+    return fn
 
 # Exception classes
 
@@ -62,6 +76,15 @@ class AlreadyExists(Exception):
     def __init__(self, *args, **kwargs):
         pass
 
+# Singleton class
+class Singleton(type):
+    _instances = {}
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+
 # Music player
 class Music:
     """
@@ -73,6 +96,9 @@ class Music:
         :param path: path to file
         :return: None
         """
+        if pygamed:
+            return
+
         if not os.path.isfile(path):
             print("[ERROR] {} is not a file or does not exist!".format(path))
 
@@ -565,8 +591,10 @@ class StaticObject(object):
         self.music = music
 
 
-class EventDispatcher:
-        # todo docstrings
+class EventDispatcher(metaclass=Singleton):
+        """
+        The event handler/dispatcher for PaC
+        """
         def __init__(self):
             self.events = {
                 "pickup" : [],
@@ -579,6 +607,12 @@ class EventDispatcher:
             }
 
         def _registerEvent(self, type, fn):
+            """
+            Should not be used directly, use decorators instead
+            :param type: one of below
+            :param fn: function's reference ('doit' NOT 'doit()')
+            :return: None
+            """
             if type == PICKUP:
                 self.events.get(PICKUP).append(fn)
 
@@ -600,14 +634,19 @@ class EventDispatcher:
             elif type == MUSIC_CHANGE:
                 self.events.get(MUSIC_CHANGE).append(fn)
 
-        def _dispatchEvent(self, type, data=None):
+        def dispatchEvent(self, type, **kwargs):
+            """
+            Runs the registered functions for the event type
+            :param type: one of the events
+            :return: None
+            """
             for fn in self.events.get(type):
 
-                if not data:
+                if not kwargs:
                     fn()
 
                 else:
-                    fn(data)
+                    fn(**kwargs)
 
         # @decorators for fast event registering
         def ENTER(self, fn):
@@ -638,14 +677,78 @@ class EventDispatcher:
             self._registerEvent(MUSIC_CHANGE, fn)
             return fn
 
+class SaveGame:
+    """
+    A module that allowes you to save the game.
+    """
+    def __init__(self, name):
+        """
+        Inits the SaveGame.
+        :param name: name of the current game
+        :return: None
+        """
+        self.name = str(name)
+
+    def save(self, things):
+        """
+        Saves the current state to save/name_divided_by_.save.
+        :param things: a tuple or list - current room, previous room, inventory (list)
+        :return: None
+        """
+        if not isinstance(things[0], Room) or not isinstance(things[1], Room):
+
+            if not isinstance(things[1], Room):
+                things[1] = things[0]
+            else:
+                raise InvalidParameters
+
+        data = dict(room=things[0], previous=things[1], inv=things[2])
+        path = "save/{}.save".format(self.name.replace(" ", "_"))
+
+        if not os.path.exists("save"):
+            os.makedirs("save")
+
+        with open(path, "wb") as file:
+            pickle.dump(data, file, pickle.HIGHEST_PROTOCOL)
+
+    def load(self):
+        """
+        Loads the save if it exists.
+        :return: a tuple in order: current room, previous room, inventory (list)
+        """
+        path = "save/{}.save".format(self.name.replace(" ", "_"))
+
+        if not os.path.isfile(path):
+            return
+
+        with open(path, "rb") as file:
+
+            data = pickle.load(file)
+
+        return data["room"], data["previous"], data["inv"]
+
+    def hasSave(self):
+        """
+        Indicates if the save is present.
+        :return: bool
+        """
+        path = "save/{}.save".format(self.name.replace(" ", "_"))
+
+        if os.path.isfile(path):
+            with open(path, "rb") as file:
+                return bool(file.read())
+
 # TextInterface handles player interaction
 
-class TextInterface:
+class TextInterface(metaclass=Singleton):
     """
     The basic Text interface that the player interacts with.
     """
-    def __init__(self):
+    def __init__(self, autosave=True):
         self.running = True
+
+        self.autosave = autosave
+        self.savec = 0
 
     def beginAdventure(self, pac):
         """
@@ -675,12 +778,27 @@ class TextInterface:
             inp = str(input(">"))
 
             if inp == "help" or inp == "what to do":
-                commands = ["go", "pick up", "use", "inv", "where", "combine", "exit"]
+                commands = ["go", "pick up", "use", "inv", "where", "combine", "save", "settings", "exit"]
                 print(", ".join(commands))
 
             # Displays possible ways out of the room (DEPRECATED!)
             elif inp.startswith(("ways", "path", "paths", "way")):
                 print("You can go to: " + ", ".join(pac.ways()))
+
+            elif inp.startswith(("settings", "preferences")):
+                print("""1. autosave : {}
+2. exit""".format("enabled" if self.autosave else "disabled"))
+                c = str(input())
+
+                if c.startswith(("1", "autosave")):
+                    c = str(input("Do you want to turn Autosaving On or Off? "))
+
+                    if c.startswith(("on", "ON", "True", "turn it on")):
+                        self.autosave = True
+                        print("Autosaving: enabled")
+                    else:
+                        self.autosave = False
+                        print("Autosaving: disabled")
 
             # Gives you a list of items in the room (DEPRECATED!)
             elif inp.startswith(("items", "objects", "items in the room", "what items are in the room")):
@@ -911,36 +1029,85 @@ class TextInterface:
             elif inp.startswith(("where am i", "where", "room")):
                 print("You are in the " + str(pac.getCurrentRoom().name))
 
+            # Saves the game
+            elif inp.startswith(("save", "save game", "do a save", "gamesave")):
+                pac._savegame()
+                print("Game has been saved.")
+
             # Option to quit game
-            elif inp.startswith("exit"):
-                n = input("Are you sure?")
+            elif inp.startswith(("exit", "quit", "q")):
+                n = str(input("Are you sure?"))
 
                 if str(n).lower().startswith(("yes", "yup", "ye", "sure", "y")):
-                    print("Bye for now!")
+                    c = str(input("Would you like to save your current game? y/n "))
+                    if c.lower() == "y":
+                        pac._savegame()
+                        print("Game saved, bye!")
+
+                    else:
+                        print("Bye!")
                     self.running = False
                     return
 
-                elif str(n).lower().startswith(("no", "nope", "n", "not sure")):
+                elif n.lower().startswith(("no", "nope", "n", "not sure")):
                     return
 
 
         # Prints the starting message and the usual for the starting room and then enters the 'infinite' loop.
 
-        print(pac.startingmessage + "\n\n" + getRoomHeader(pac.startingroom.name) + "\n" + pac.startingroom.enter())
+        pac._initsave()  # creates SaveGame instance at pac.saving
+        if pac.saving.hasSave():
+            doit = str(input("A save has been found. Do you want to load the save? y/n "))
 
-        while self.running:  # Defaults to True
+            if doit.lower() == "y":
+                pac._loadgame()
+
+                if pac.currentroom.music:
+                    pac._startMusicThread(pac.currentroom.music)
+
+                print("Save loaded.")
+            elif doit.lower() == "n":
+                c = input("Are you sure? With next save all your progress will be lost. y (continue) / n (load save anyway) ")
+                if c.lower() == "n":
+                    pac._loadgame()
+
+                    if pac.currentroom.music:
+                        pac._startMusicThread(pac.currentroom.music)
+
+                    print("Save loaded.")
+
+                else:
+                    pass
+
+        print(pac.startingmessage + "\n\n" + getRoomHeader(pac.currentroom.name) + "\n" + pac.currentroom.enter())
+
+        while self.running:  # Defaults to True, creates an infinite loop until exiting
+
+            if self.savec >= 4 and self.autosave is True:
+                pac._savegame()
+                self.savec = 0
+
             textadventure()
+            self.savec += 1
 
         # Code never reaches this point... probably (except when quitting)
 
 # Main class
-class PaCInterpreter:
+class PaCInterpreter(metaclass=Singleton):
     """
     The interpreter, linking together all objects and your code.
     PaC stands for point and click (adventure) ;)
     """
 
-    def __init__(self, eventdispatcher=None):
+    def __init__(self, name=None, desc=None, version=None, autosave=True):
+        # Game info vars
+        self.name = name
+        self.description = desc
+        self.version = version
+
+        self.saving = None
+
+        # Game engine stuff
         self.rooms = {}
         self.items = {}
         self.statics = {}
@@ -966,10 +1133,13 @@ class PaCInterpreter:
         self.defaultfailedcombine = "Can't do that..."
 
         self.musicthread = None
-        self.events = eventdispatcher
+        self.events = None
 
-    def setEventDispatcher(self, eventdispatcher):
+        self.autosave = autosave
+
+    def _setEventDispatcher(self, eventdispatcher):
         """
+        DEPRECATED, EventDispatcher is now a singleton so setting one is not needed
         Associates the instance of EventDispatcher with PacInterpreter
         :param eventdispatcher: an instance of EventDispatcher (optional)
         :return: None
@@ -979,29 +1149,29 @@ class PaCInterpreter:
 
         self.events = eventdispatcher
 
-    def start(self):
+    def start(self, askforsave=True):
         """
         Starts the adventure with you in the default room and the starting message. If you have not defined a starting room or message, MissingParameters will be raised.
         :return: None
         """
         self.running = True
+        self.currentroom = self.startingroom
+
 
         mixer.init()  # Inits the mixer module (for Music)
 
         if not self.events:
             self.events = EventDispatcher()
 
-        self.events._dispatchEvent(START)
+        self.events.dispatchEvent(START)
 
         if not self.startingroom or not self.startingmessage:
             raise MissingParameters
 
-        self.currentroom = self.startingroom
-
         self.visits.append(self.currentroom)
 
         # Instances the TextInterface class (no need for it to be class-wide for now)
-        textinterface = TextInterface()
+        textinterface = TextInterface(autosave=self.autosave)
 
         # If the starting room has music, start playing.
         if self.startingroom.music:
@@ -1241,7 +1411,7 @@ class PaCInterpreter:
                 self.putIntoInv(result)
 
                 # Dispatch event
-                self.events._dispatchEvent(COMBINE, {"item1": item1, "item2": item2, "result": result})
+                self.events.dispatchEvent(COMBINE, item1=item1, item2=item2, result=result)
 
                 return result.craft()
 
@@ -1337,7 +1507,7 @@ class PaCInterpreter:
                 return self.defaultfailedpickup
 
         it = self.currentroom.pickUpItem(item)
-        self.events._dispatchEvent(PICKUP, {"item": item, "desc": it})
+        self.events.dispatchEvent(PICKUP, item=item, desc=it)
 
         thatitem = self.items[item.name]
         self.putIntoInv(thatitem)
@@ -1365,7 +1535,7 @@ class PaCInterpreter:
                     return self.defaultfaileduse
 
             desc = item.use()
-            self.events._dispatchEvent(USE_ITEM, {"item": item, "desc": desc})
+            self.events.dispatchEvent(USE_ITEM, item=item, desc=desc)
             return desc
 
     def useStaticObject(self, obj, item=None):
@@ -1398,7 +1568,7 @@ class PaCInterpreter:
                     self._startMusicThread(obj.music)
                 desc = obj.useWithItem(item)
 
-            self.events._dispatchEvent(USE_OBJECT, {"object": obj, "desc": desc})
+            self.events.dispatchEvent(USE_OBJECT, object=obj, desc=desc)
             return desc
 
     def walk(self, room):
@@ -1408,6 +1578,7 @@ class PaCInterpreter:
         :param room: Room to go to
         :return: Room onenter string if everything is okay, a list with one item in a string of not
         """
+
         # Gets the Room object
         if isinstance(room, Room):
             pass
@@ -1437,7 +1608,7 @@ class PaCInterpreter:
         roomr = room.hasVisitRequirement(self.visits)
 
         if itemr or roomr:
-            self.events._dispatchEvent(ENTER, {"from": self.currentroom, "to": room, "first-time": not room.firstenter})
+            self.events.dispatchEvent(ENTER, fr=self.currentroom, to=room, first_time=not room.firstenter)
 
         if itemr == 1:
             if roomr == 1:  # Only if everything is fulfilled, return room description
@@ -1479,7 +1650,7 @@ class PaCInterpreter:
         """
         room = self.currentroom
 
-        if not room or not isinstance(room, Room):
+        if not self.currentroom or not isinstance(self.currentroom, Room):
             raise MissingParameters
 
         try:
@@ -1527,5 +1698,29 @@ class PaCInterpreter:
         self.lastmusicthread = music
         self.musicthread.__init__(self.musicthread.path)
 
-        self.events._dispatchEvent(MUSIC_CHANGE, {"music": music, "path": music.path})
+        self.events.dispatchEvent(MUSIC_CHANGE, music=music, path=music.path)
         self.musicthread.start(repeat)
+
+    def _savegame(self):
+        """
+        Saves the current state of the game to save/nameofthegame.save
+        :return: None
+        """
+        self.saving.save([self.currentroom, self.roombeforethisone, self.inv])
+
+    def _initsave(self):
+        self.saving = SaveGame(self.name)
+
+    def _loadgame(self):
+        if self.saving.hasSave():
+            room, oneback, inv = self.saving.load()
+
+            if not isinstance(room, Room):
+                room = self.getRoomByName(room)
+            self.currentroom = room
+
+            if not isinstance(oneback, Room):
+                oneback = self.getRoomByName(oneback)
+            self.roombeforethisone = oneback
+
+            self.inv = inv

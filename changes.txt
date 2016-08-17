@@ -1,3 +1,9 @@
+0.4
+- Game saving implemented
+- PaCInterpreter, TextInterface and EventHandler are now singletons, allowing for simpler event registering
+- Logging added
+- Bugs fixed
+
 0.3.1
 - Decorators for simple event registering added
 - PaC can now be installed as a package

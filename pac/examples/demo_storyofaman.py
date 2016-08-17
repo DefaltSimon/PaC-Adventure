@@ -1,6 +1,5 @@
 # coding=utf-8
 """
-This is an example of what can the interpreter do. Not everything is covered, but most for the 0.2.1 version is.
 
 It all works like this:
 
@@ -15,8 +14,12 @@ For more advanced examples see eventhandling.py
 # Interpreter import
 from pac import PaCInterpreter
 
-# Instance of the interpreter
-pac = PaCInterpreter()
+# Instance of the interpreter with name and description (only the name is required)
+pac = PaCInterpreter(
+    name="Story of a Man",
+    desc="Engine demo",
+    version="0.3"
+)
 
 # Rooms
 room1 = pac.createRoom(

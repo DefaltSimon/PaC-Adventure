@@ -9,7 +9,9 @@ from pac import PaCInterpreter, EventDispatcher
 
 
 # Instance of the interpreter
-pac = PaCInterpreter()
+pac = PaCInterpreter(
+    name="Event Handling demo"
+)
 
 # Rooms
 room1 = pac.createRoom(
@@ -40,7 +42,7 @@ pac.setDefaultCombineFailMessage("Can't do that...")
 
 pac.putitem(room1, item1, "There is a phone on the desk.")
 
-pac.setStartingMessage("This example features event registering and handling.\nA custom message will be printed when you walk.")
+pac.setStartingMessage("This example features event registering and handling.\nA custom message will be printed when you move from room to room.")
 
 
 # PaC-Adventure also has an event handling module (implemented in 0.3)
@@ -51,13 +53,11 @@ def onstart():
     print("Game has started.")
 
 @events.ENTER
-def onenter(data):
-    print("Went from {} to {} (First time: {}).".format(data.get("from").name, data.get("to").name, data.get("first-time")))
+def onenter(**kwargs):
+    print("Went from {} to {} (First time: {}).".format(kwargs.get("fr").name, kwargs.get("to").name, kwargs.get("first_time")))
 
 # Available events: PICKUP, COMBINE, START, ENTER, USE_ITEM, USE_OBJECT, MUSIC_CHANGE
 # events._registerEvent(START, onstart) # Events can also be registered this way, but above with decorators is much more intuitive
-
-pac.setEventDispatcher(events)  # Needs to be done before start() method.
 
 # Starts the game
 pac.start()
