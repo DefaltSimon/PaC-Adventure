@@ -6,20 +6,20 @@ import pickle
 import threading
 import time
 import os
+import textwrap
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 # Imports
-pygamed = False
 try:
     from pygame import mixer
 except ImportError:
-    pygamed = True
-    logging.warn("[WARNING] pygame is not installed, music will NOT work.")
+    mixer = None
+    logging.warn("pygame is not installed, music will NOT work.")
 
 __author__ = "DefaltSimon"
-__version__ = "0.4"
+__version__ = "0.4.1dev"
 
 # Constants
 PICKUP = "pickup"
@@ -30,13 +30,38 @@ START = "start"
 ENTER = "enter"
 MUSIC_CHANGE = "music"
 
+# Total length of the room name header
+PADDING = 65
 
 # For simple threading
+
 
 def threaded(fn):
     def wrapper(*args, **kwargs):
         threading.Thread(target=fn, args=args, kwargs=kwargs).start()
     return wrapper
+
+
+def update_textwrap():
+    global tw
+    tw = textwrap.TextWrapper(width=PADDING, break_long_words=False, replace_whitespace=False)
+
+update_textwrap()
+
+
+def wraptext(s):
+    if tw.width != PADDING:
+        update_textwrap()
+
+    print(textwrap.fill(s, PADDING))
+
+
+def get_wrap(s):
+    if tw.width != PADDING:
+        update_textwrap()
+
+    return textwrap.fill(s, PADDING)
+
 
 def save(fn):
     fn.__self__.save.save(fn.__self__.currentroom, fn.__self__.roombeforethisone, fn.__self__.inv)
@@ -45,40 +70,46 @@ def save(fn):
 # Exception classes
 
 
-class MissingParameters(Exception):
+class InterpreterException(Exception):
+    """
+    General exception class, other exceptions are subclassed to this.
+    """
+    pass
+
+
+class MissingParameters(InterpreterException):
     """
     Thrown when some parameters are missing.
     """
-    def __init__(self, *args, **kwargs):
-        pass
+    pass
 
 
-class InvalidParameters(Exception):
+class InvalidParameters(InterpreterException):
     """
     To be expected when an invalid variable type was passed.
     """
-    def __init__(self, *args, **kwargs):
-        pass
+    pass
 
 
-class NotLinked(Exception):
+class NotLinked(InterpreterException):
     """
     Thrown when a room you tried to enter is not liked to the current room.
     """
-    def __init__(self, *args, **kwargs):
-        pass
+    pass
 
 
-class AlreadyExists(Exception):
+class AlreadyExists(InterpreterException):
     """
     Raised when an Item or Room with the same name already exist.
     """
-    def __init__(self, *args, **kwargs):
-        pass
+    pass
 
 # Singleton class
+
+
 class Singleton(type):
     _instances = {}
+
     def __call__(cls, *args, **kwargs):
         if cls not in cls._instances:
             cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
@@ -86,6 +117,8 @@ class Singleton(type):
 
 
 # Music player
+
+
 class Music:
     """
     Represents the Music that is played when entering a room or interacting with an object.
@@ -96,15 +129,15 @@ class Music:
         :param path: path to file
         :return: None
         """
-        if pygamed:
+        if not mixer:
             return
 
         if not os.path.isfile(path):
             print("[ERROR] {} is not a file or does not exist!".format(path))
 
         self.path = str(path)
-        self._keepalive = threading.Event()
-        self.isstarted = False
+        # self._keep_alive = threading.Event()
+        self.is_started = False
 
     def start(self, repeat=True):
         """
@@ -121,8 +154,8 @@ class Music:
 
         time.sleep(0.1)
 
-
-    def stop(self):
+    @staticmethod
+    def stop():
         """
         Sets a flag (Event) to True so the thread quits on next iteration (max time for next iteration: 0.1 s)
         :return: None
@@ -137,24 +170,24 @@ class Room(object):
     """
     Represents a room that the player can move into and interact with its objects, etc...
     """
-    def __init__(self, name, desc, enterdesc=None, starting=False):
+    def __init__(self, name, desc, enter_description=None, starting=False):
         self.name = str(name)
 
         self.desc = str(desc)
-        self.onfirstenterdesc = enterdesc
+        self.on_first_enter = enter_description
 
-        self.isdefault = bool(starting)
-        self.firstenter = False
+        self.is_default = bool(starting)
+        self.entered = False
 
         self.items = {}
-        self.itemdescs = {}
+        self.item_descriptions = {}
 
         self.statics = {}
-        self.staticdescs = {}
+        self.static_obj_descriptions = {}
 
         self.requirements = {
-            "items" : [],
-            "visited" : [],
+            "items": [],
+            "visited": [],
         }
         self.music = None
 
@@ -164,7 +197,7 @@ class Room(object):
         """
         return self.desc
 
-    def putitem(self, item, description):
+    def put_item(self, item, description):
         """
         Puts an Item into the room.
         :param item: Item object to put in the room
@@ -177,9 +210,9 @@ class Room(object):
 
         self.items[item.name] = item
 
-        self.itemdescs[item.name] = str(description)
+        self.item_descriptions[item.name] = str(description)
 
-    def putstatic(self, obj, description):
+    def put_static_obj(self, obj, description):
         """
         Places a StaticObject into the room.
         :param obj: StaticObject object to place into the room
@@ -191,7 +224,7 @@ class Room(object):
 
         self.statics[obj.name] = obj
 
-        self.staticdescs[obj.name] = str(description)
+        self.static_obj_descriptions[obj.name] = str(description)
 
     def enter(self):
         """
@@ -199,44 +232,38 @@ class Room(object):
         """
 
         # Build item descriptions if they exists (if there are any items in the room)
-        if self.itemdescs:
-            itms = "\n" + " ".join(self.itemdescs.values())
-        else:
-            itms = ""
+        items = ("\n" if self.item_descriptions.values() else "") + "\n".join(self.item_descriptions.values())
 
-        # Builds static objects descrptions if they exist in the room
-        if self.staticdescs:
-            statics = " " + " ".join(self.staticdescs.values())
-        else:
-            statics = ""
+        # Builds static objects descriptions if they exist in the room
+        statics = (" " if self.static_obj_descriptions.values() else "") + " ".join(self.static_obj_descriptions.values())
 
-        if not self.firstenter:
-            self.firstenter = True
+        if not self.entered:
+            self.entered = True
 
-            if self.onfirstenterdesc:
-                return str(self.onfirstenterdesc + statics + "\n" + self.desc + itms)
+            if self.on_first_enter:
+                return str(self.on_first_enter + statics + "\n" + self.desc + items)
             else:
-                return self.desc + statics + itms
+                return self.desc + statics + items
 
         else:
-            return self.desc + statics + itms
+            return self.desc + statics + items
 
-    def getItems(self):
+    def get_items(self):
         """
         :return: A list of items in the room
         """
         return list(self.items.values())
 
-    def getStatics(self):
+    def get_static_items(self):
         """
         :return: A list of static objects in the room
         """
         return list(self.statics.values())
 
-    def useItem(self, item):
+    def use_item(self, item):
         """
         :param item: Item object to use
-        :return: Item onuse string
+        :return: Item on_use string
         """
         # Converts string to Item if needed
         if isinstance(item, Item):
@@ -247,14 +274,14 @@ class Room(object):
 
         desc = item.use()
         self.items.pop(item.name)
-        self.itemdescs.pop(item.name)
+        self.item_descriptions.pop(item.name)
 
         return desc
 
-    def pickUpItem(self, item):
+    def pick_up_item(self, item):
         """
         :param item: Item object or string (item name)
-        :return: Item onpickup string
+        :return: Item on_pickup string
         """
         # Converts string to Item if needed and checks if the item exists in the room
         if isinstance(item, Item):
@@ -270,53 +297,51 @@ class Room(object):
             except KeyError:
                 return False
 
-        desc = item.pickUp()
+        desc = item.pick_up()
         self.items.pop(item.name)
+        self.item_descriptions.pop(item.name)
 
         return desc
 
-    def addVisitRequirement(self, room, ondenymessage):
+    def add_visit_requirement(self, room, on_deny):
         """
         Adds a room visit requirement to the room.
         :param room: Room object or room name
-        :param ondenymessage: string
+        :param on_deny: string
         :return: None
         """
         if not isinstance(room, Room):
             raise InvalidParameters
 
         else:
-            self.requirements["visited"].append((room, ondenymessage))  # Tuple
+            self.requirements["visited"].append((room, on_deny))  # Tuple
 
-    def addItemRequirement(self, item, ondenymessage):
+    def add_item_requirement(self, item, on_deny):
         """
         Adds an item requirement to the room.
         :param item: Item object
-        :param ondenymessage: Message to be printed when not trying to enter the room and not having the item.
+        :param on_deny: Message to be printed when not trying to enter the room and not having the item.
         :return: None
         """
         if not isinstance(item, Item):
             raise InvalidParameters
 
-        self.requirements["items"].append((item, ondenymessage))  # Tuple
+        self.requirements["items"].append((item, on_deny))  # Tuple
 
-    def hasVisitRequirement(self, visitedrooms):
+    def has_visit_requirement(self, visited_rooms):
         """
         Indicates if the room has all room visit requirements.
-        :param visitedrooms: A list of Room objects that the player has visited
+        :param visited_rooms: A list of Room objects that the player has visited
         :return: 1 if has all requirements, str of required messages joined with \n otherwise.
         """
-        if not isinstance(visitedrooms, list):
+        if not isinstance(visited_rooms, list):
             raise InvalidParameters
 
-
         # Build room list
-        rms = []
-        for this in self.requirements["visited"]:
-            rms.append(this[0])
+        rms = [this[0] for this in self.requirements.get("visited")]
 
         for element in rms:
-            if element not in visitedrooms:
+            if element not in visited_rooms:
 
                 places = []
                 for item in self.requirements["visited"]:
@@ -326,7 +351,7 @@ class Room(object):
 
         return 1
 
-    def hasItemRequirements(self, items):
+    def has_item_requirements(self, items):
         """
         Indicates if the room has all Item requirements.
         :param items: A list of Item objects (in the player's inventory)
@@ -348,7 +373,7 @@ class Room(object):
 
         return 1
 
-    def addMusic(self, music):
+    def add_music(self, music):
         """
         Adds a Music object that will start playing when the player enters.
         :param music: path or Music
@@ -367,25 +392,25 @@ class Item(object):
     """
     An item that the player can pick up, use, combine, etc.
     """
-    def __init__(self, name, desc, onuse, faileduse, failedpickup, onpickup=None, craftable=False, craftingdesc=None):
+    def __init__(self, name, desc, on_use, on_failed_use, on_failed_pickup, on_pickup=None, is_craftable=False, crafting_description=None):
         self.name = str(name)
         self.desc = str(desc)
 
         self.used = False
-        self.pickedup = False
+        self.picked_up = False
         self.crafted = False
 
-        self.onuse = str(onuse)
-        self.onpickup = onpickup
+        self.on_use = str(on_use)
+        self.on_pickup = on_pickup
 
-        self.craftable = bool(craftable)
-        self.crafttingdesc = craftingdesc
+        self.is_craftable = bool(is_craftable)
+        self.crafting_description = crafting_description
 
-        self.onfaileduse = faileduse
-        self.onfailedpickup = failedpickup
+        self.on_failed_use = on_failed_use
+        self.on_failed_pickup = on_failed_pickup
 
-        self.pickuprequires = []
-        self.userequires = []
+        self.pickup_requires = []
+        self.use_requires = []
 
     def description(self):
         """
@@ -393,7 +418,7 @@ class Item(object):
         """
         return self.desc
 
-    def wasused(self):
+    def was_used(self):
         """
         :return: A bool indicating if the Item has been used.
         """
@@ -402,66 +427,66 @@ class Item(object):
     def use(self):
         """
         "Uses" the item, settings its used property to True.
-        :return: Item onuse string
+        :return: Item on_use string
         """
         # Must use hasUseRequirements!
         self.used = True
 
-        return self.onuse
+        return self.on_use
 
-    def pickUp(self):
+    def pick_up(self):
         """
         "Picks up" the item
-        :return: Item onpickup string
+        :return: Item on_pickup string
         """
         # Must use hasPickUpRequirements!
-        self.pickedup = True
+        self.picked_up = True
 
-        return self.onpickup
+        return self.on_pickup
 
     def craft(self):
-        if not self.craftable:
+        if not self.is_craftable:
             return False
 
         else:
             self.crafted = True
-            return self.crafttingdesc
+            return self.crafting_description
 
-    def hasPickUpRequirements(self, items):
+    def has_pick_up_requirements(self, items):
         """
         Checks if you have the proper items to pick up this one.
         :param items: A list of Item objects (usually your inventory)
         :return: Bool indicating the result
         """
         if isinstance(items, list):
-            hasitems = True
+            has_items = True
 
-            for item in self.pickuprequires:
+            for item in self.pickup_requires:
                 try:
                     items.index(item)
                 except ValueError:
-                    hasitems = False
+                    has_items = False
 
-            return bool(hasitems)
+            return bool(has_items)
 
-    def hasUseRequirements(self, items):
+    def has_use_requirements(self, items):
         """
         Checks if you have the proper items to use this one.
         :param items: A list of Item objects (usually your inventory)
         :return: Bool indicating the result
         """
         if isinstance(items, list):
-            hasitems = True
+            has_items = True
 
-            for item in self.userequires:
+            for item in self.use_requires:
                 try:
                     items.index(item)
                 except ValueError:
-                    hasitems = False
+                    has_items = False
 
-            return bool(hasitems)
+            return bool(has_items)
 
-    def addPickUpRequirement(self, item):
+    def add_pick_up_requirement(self, item):
         """
         Adds a pick up requirement for this item.
         :param item: Item object
@@ -470,9 +495,9 @@ class Item(object):
         if not isinstance(item, Item):
             raise InvalidParameters
 
-        self.pickuprequires.append(item)
+        self.pickup_requires.append(item)
 
-    def addUseRequirement(self, item):
+    def add_use_requirement(self, item):
         """
         Adds a use requirement for this item.
         :param item: Item object
@@ -481,26 +506,25 @@ class Item(object):
         if not isinstance(item, Item):
             raise InvalidParameters
 
-        self.userequires.append(item)
+        self.use_requires.append(item)
+
 
 class StaticObject(object):
-    def __init__(self, name, display, onuse, faileduse):
+    def __init__(self, name, display, on_use, on_failed_use):
         self.name = str(name)
         self.display = str(display)
 
-        self.onuse = str(onuse)
-
+        self.on_use = str(on_use)
         self.used = False
 
-        self.onfaileduse = faileduse
+        self.on_failed_use = on_failed_use
 
-        self.itemrequirements = []
-
-        self.itemblueprints = {}
+        self.item_requirements = []
+        self.item_blueprints = {}
 
         self.music = None
 
-    def wasused(self):
+    def was_used(self):
         """
         :return: Bool indicating if the StaticObject was used.
         """
@@ -508,11 +532,11 @@ class StaticObject(object):
 
     def use(self):
         """
-        :return: onuse string
+        :return: on_use string
         """
-        return self.onuse
+        return self.on_use
 
-    def useWithItem(self, item):
+    def use_with_item(self, item):
         """
         Uses the Item on the StaticObject if a blueprint for it exists
         :param item: Item
@@ -521,41 +545,40 @@ class StaticObject(object):
         if not isinstance(item, Item):
             raise InvalidParameters
 
-        if item.name in self.itemblueprints:
-            return self.itemblueprints[item.name]
+        if item.name in self.item_blueprints:
+            return self.item_blueprints[item.name]
 
         else:
             return False
 
-
-    def takeNotice(self):
+    def take_notice(self):
         """
         Don't mind the name.
         :return: display string
         """
         return self.display
 
-    def hasItemRequirements(self, items):
+    def has_item_requirements(self, items):
         """
         Checks if you have the proper items to pick up this one.
         :param items: A list of Item objects (usually your inventory)
         :return: Bool indicating the result
         """
         if isinstance(items, list):
-            hasitems = True
+            has_items = True
 
-            for item in self.itemrequirements:
+            for item in self.item_requirements:
                 try:
                     items.index(item)
                 except ValueError:
-                    hasitems = False
+                    has_items = False
 
-            return bool(hasitems)
+            return bool(has_items)
 
         else:
             return False
 
-    def addItemRequirement(self, item):
+    def add_item_requirement(self, item):
         """
         Adds a pick up requirement for this item.
         :param item: Item object
@@ -564,21 +587,21 @@ class StaticObject(object):
         if not isinstance(item, Item):
             raise InvalidParameters
 
-        self.itemrequirements.append(item)
+        self.item_requirements.append(item)
 
-    def addItemBlueprint(self, item, descrption):
+    def add_item_blueprint(self, item, description):
         """
         Add the Item to the list of usable items for this StaticObject.
         :param item: Item object
-        :param descrption: string to display when using this item on this static object
+        :param description: string to display when using this item on this static object
         :return: None
         """
         if not isinstance(item, Item):
             raise InvalidParameters
 
-        self.itemblueprints[item.name] = str(descrption)
+        self.item_blueprints[item.name] = str(description)
 
-    def addMusic(self, music):
+    def add_music(self, music):
         """
         Adds a Music object that will start playing when the player enters.
         :param music: path or Music
@@ -597,50 +620,50 @@ class EventDispatcher(metaclass=Singleton):
         """
         def __init__(self):
             self.events = {
-                "pickup" : [],
-                "use-item" : [],
-                "use-object" : [],
-                "start" : [],
-                "combine" : [],
-                "enter" : [],
+                "pickup": [],
+                "use-item": [],
+                "use-object": [],
+                "start": [],
+                "combine": [],
+                "enter": [],
                 "music": []
             }
 
-        def _registerEvent(self, type, fn):
+        def _register_event(self, event_type, fn):
             """
             Should not be used directly, use decorators instead
-            :param type: one of below
+            :param event_type: one of below
             :param fn: function's reference ('doit' NOT 'doit()')
             :return: None
             """
-            if type == PICKUP:
+            if event_type == PICKUP:
                 self.events.get(PICKUP).append(fn)
 
-            elif type == USE_ITEM:
+            elif event_type == USE_ITEM:
                 self.events.get(USE_ITEM).append(fn)
 
-            elif type == USE_OBJECT:
+            elif event_type == USE_OBJECT:
                 self.events.get(USE_OBJECT).append(fn)
 
-            elif type == START:
+            elif event_type == START:
                 self.events.get(START).append(fn)
 
-            elif type == COMBINE:
+            elif event_type == COMBINE:
                 self.events.get(COMBINE).append(fn)
 
-            elif type == ENTER:
+            elif event_type == ENTER:
                 self.events.get(ENTER).append(fn)
 
-            elif type == MUSIC_CHANGE:
+            elif event_type == MUSIC_CHANGE:
                 self.events.get(MUSIC_CHANGE).append(fn)
 
-        def dispatchEvent(self, type, **kwargs):
+        def dispatch_event(self, event_type, **kwargs):
             """
             Runs the registered functions for the event type
-            :param type: one of the events
+            :param event_type: one of the events
             :return: None
             """
-            for fn in self.events.get(type):
+            for fn in self.events.get(event_type):
 
                 if not kwargs:
                     fn()
@@ -650,95 +673,101 @@ class EventDispatcher(metaclass=Singleton):
 
         # @decorators for fast event registering
         def ENTER(self, fn):
-            self._registerEvent(ENTER, fn)
+            self._register_event(ENTER, fn)
             return fn
 
         def PICKUP(self, fn):
-            self._registerEvent(PICKUP, fn)
+            self._register_event(PICKUP, fn)
             return fn
 
         def USE_ITEM(self, fn):
-            self._registerEvent(USE_ITEM, fn)
+            self._register_event(USE_ITEM, fn)
             return fn
 
         def USE_OBJECT(self, fn):
-            self._registerEvent(USE_OBJECT, fn)
+            self._register_event(USE_OBJECT, fn)
             return fn
 
         def COMBINE(self, fn):
-            self._registerEvent(COMBINE, fn)
+            self._register_event(COMBINE, fn)
             return fn
 
         def START(self, fn):
-            self._registerEvent(START, fn)
+            self._register_event(START, fn)
             return fn
 
         def MUSIC_CHANGE(self, fn):
-            self._registerEvent(MUSIC_CHANGE, fn)
+            self._register_event(MUSIC_CHANGE, fn)
             return fn
+
 
 class SaveGame:
     """
-    A module that allowes you to save the game.
+    A module that allows you to save the game.
     """
-    def __init__(self, name):
+    def __init__(self, name, version):
         """
-        Inits the SaveGame.
+        Initializes the SaveGame.
         :param name: name of the current game
         :return: None
         """
-        self.name = str(name)
+        self.game_name = str(name)
+        self.game_version = str(version)
 
-    def save(self, things):
+    def save(self, data):
         """
         Saves the current state to save/name_divided_by_.save.
-        :param things: a tuple or list - current room, previous room, inventory (list)
+        :param data: a tuple or list - current room, previous room, inventory (list)
         :return: None
         """
-        if not isinstance(things[0], Room) or not isinstance(things[1], Room):
+        path = "save/{}.save".format(str(self.game_name).replace(" ", "_"))
 
-            if not isinstance(things[1], Room):
-                things[1] = things[0]
-            else:
-                raise InvalidParameters
-
-        data = dict(room=things[0], previous=things[1], inv=things[2])
-        path = "save/{}.save".format(self.name.replace(" ", "_"))
-
-        if not os.path.exists("save"):
+        if not os.path.isdir("save"):
             os.makedirs("save")
 
-        with open(path, "wb") as file:
-            pickle.dump(data, file, pickle.HIGHEST_PROTOCOL)
+        log.debug("Saving game...")
+
+        pickle.dump(data, open(path, "wb"), pickle.HIGHEST_PROTOCOL)
 
     def load(self):
         """
         Loads the save if it exists.
         :return: a tuple in order: current room, previous room, inventory (list)
         """
-        path = "save/{}.save".format(self.name.replace(" ", "_"))
+        path = "save/{}.save".format(self.game_name.replace(" ", "_"))
 
         if not os.path.isfile(path):
-            return
+            return None
 
         with open(path, "rb") as file:
-
             data = pickle.load(file)
 
-        return data["room"], data["previous"], data["inv"]
+        if not str(data.get("game_info").get("version")) == self.game_version:
+            return None
 
-    def hasSave(self):
+        return data
+
+    def has_valid_save(self):
         """
-        Indicates if the save is present.
+        Indicates if a valid save is present.
         :return: bool
         """
-        path = "save/{}.save".format(self.name.replace(" ", "_"))
+        path = "save/{}.save".format(self.game_name.replace(" ", "_"))
 
         if os.path.isfile(path):
             with open(path, "rb") as file:
-                return bool(file.read())
+                d = pickle.load(file)
+
+                a = bool(d.get("game_info").get("version") == self.game_version)
+                b = bool(d.get("game_info").get("name") == self.game_name)
+
+                return bool(a is True and b is True)
+
+        else:
+            return False
 
 # TextInterface handles player interaction
+
 
 class TextInterface(metaclass=Singleton):
     """
@@ -748,15 +777,15 @@ class TextInterface(metaclass=Singleton):
         self.running = True
 
         self.autosave = autosave
-        self.savec = 0
+        self.save_count = 0
 
-    def beginAdventure(self, pac):
+    def begin_adventure(self, pac):
         """
         Prints the starting message and begins the while True loop, starting user interaction : the game.
         :param pac: PaCInterpreter created by user
         :return: None
         """
-        def getRoomHeader(room):
+        def get_room_header(room):
             if isinstance(room, Room):
                 room = room.name
 
@@ -765,35 +794,32 @@ class TextInterface(metaclass=Singleton):
 
             wys = ", ".join(pac.ways())
 
-            totallen = 65  # Total length of the header
-            ti = int( (totallen-len(room)) / 2)
-            ti2 = int( (totallen-len(wys)) / 2)
+            ti = int( (PADDING-len(room)) / 2)
 
-            hd = ("-" * ti) + room + ("-" * ti) + "\n" + "You can go to: " + wys + "\n" # Header
+            hd = ("-" * ti) + room + ("-" * ti) + "\n" + "You can go to: " + wys + "\n"  # Header
 
             return hd
 
-
-        def textadventure():
+        def text_adventure():
             inp = str(input(">"))
 
             if inp == "help" or inp == "what to do":
                 commands = ["go", "pick up", "use", "inv", "where", "combine", "save", "settings", "exit"]
-                print(", ".join(commands))
+                wraptext(", ".join(commands))
 
             # Displays possible ways out of the room (DEPRECATED!)
             elif inp.startswith(("ways", "path", "paths", "way")):
-                print("You can go to: " + ", ".join(pac.ways()))
+                wraptext("You can go to: " + ", ".join(pac.ways()))
 
             elif inp.startswith(("settings", "preferences")):
-                print("""1. autosave : {}
-2. exit""".format("enabled" if self.autosave else "disabled"))
-                c = str(input())
+                print("1. autosave : {}\n2. exit".format("enabled" if self.autosave else "disabled"))
 
-                if c.startswith(("1", "autosave")):
-                    c = str(input("Do you want to turn Autosaving On or Off? "))
+                ce = str(input())
 
-                    if c.startswith(("on", "ON", "True", "turn it on")):
+                if ce.startswith(("1", "autosave")):
+                    ce = str(input("Do you want to turn Autosaving On or Off? "))
+
+                    if ce.startswith(("on", "ON", "True", "turn it on")):
                         self.autosave = True
                         print("Autosaving: enabled")
                     else:
@@ -802,52 +828,47 @@ class TextInterface(metaclass=Singleton):
 
             # Gives you a list of items in the room (DEPRECATED!)
             elif inp.startswith(("items", "objects", "items in the room", "what items are in the room")):
-                objects = pac.getCurrentRoom().getItems()
+                object_list = pac.get_current_room().get_items()
 
-                objs = []
-                for obj in objects:
+                objects = []
+                for obj in object_list:
                     # Just for the correct grammar jk
                     if str(obj.name).startswith(("a", "e", "i", "o", "u")):
                         um = "an"
                     else:
                         um = "a"
 
-                    objs.append(str(um + " " + obj.name))
-
+                    objects.append(str(um + " " + obj.name))
 
                 # Correct prints
-                if len(objs) == 0:
+                if len(objects) == 0:
                     print("There are no items here.")
 
-                elif len(objs) == 1:
+                elif len(objects) == 1:
 
-                    print("In the room there is " + objs[0])
+                    print("In the room there is " + objects[0] + "\n")
 
                 else:
-                    print("In the room there are " + ", ".join(objs))
+                    wraptext("In the room there are " + ", ".join(objects))
 
             # Moves the player back to the previous room.
             elif inp.startswith("go back"):
 
                 try:
-                    insert = str(pac.roombeforethisone.name)  # Stores room before calling goback() method where the room gets changed
-                except AttributeError:
-                    return
+                    insert = str(pac.previous_room.name)
+                    # Stores room before calling go_back() method where the room gets changed
 
-                try:
-                    desc = pac.goback()
-                except NotImplementedError:
-                    return
-                except NotLinked:
-                    return
+                    desc = pac.go_back()
 
+                except NotImplementedError or NotLinked or AttributeError:
+                    return
 
                 if not isinstance(desc, list):
-                    print(getRoomHeader(pac.currentroom))
-                    print(desc)
+                    print(get_room_header(pac.current_room))
+                    wraptext(desc)
 
                 else:
-                    print(desc[0])
+                    wraptext(desc[0])
 
             # Moves the player to a different room
             elif inp.startswith(("walk ", "go ", "go to ", "walk to ", "walk down ", "go down")):
@@ -870,11 +891,8 @@ class TextInterface(metaclass=Singleton):
                 elif inp.startswith("walk to"):
                     rn = inp[len("walk to "):]
 
+                # Printed when you did "walk [somethingthatisnothere]"
                 else:
-                    rn = None
-
-
-                if not rn:
                     print("Where do you want to go?")
                     return
 
@@ -891,18 +909,15 @@ class TextInterface(metaclass=Singleton):
                 # Walks and prints
                 try:
                     desc = pac.walk(str(rn))
-                except NotImplementedError:
+                except NotImplementedError or NotLinked:
                     return
-                except NotLinked:
-                    return
-
 
                 if not isinstance(desc, list):
-                    print(getRoomHeader(pac.currentroom))
-                    print(desc)
+                    print(get_room_header(pac.current_room))
+                    wraptext(desc)
 
                 else:
-                    print(desc[0])
+                    wraptext(desc[0])
 
             # Picks up the item in the room and puts it into your inventory
             elif inp.startswith("pick up"):
@@ -921,13 +936,12 @@ class TextInterface(metaclass=Singleton):
                 elif on.startswith("the "):
                     on = on[len("the "):]
 
-
-                onuse = pac.pickUpItem(on)
-                if not onuse:
+                on_use = pac.pick_up_item(on)
+                if not on_use:
                     pass
 
                 else:
-                    print(onuse)
+                    wraptext(on_use)
 
             # Uses the item in your inventory
             elif inp.startswith("use"):
@@ -947,7 +961,7 @@ class TextInterface(metaclass=Singleton):
                     on = on[len("the "):]
 
                 try:
-                    desc = pac.useItem(pac.getItemByName(on))
+                    desc = pac.use_item(pac.get_item_by_name(on))
 
                 except NotImplementedError:
                     spl = on.split(" with ")
@@ -960,14 +974,14 @@ class TextInterface(metaclass=Singleton):
                             return
 
                     try:
-                        desc = pac.useStaticObject(pac.getStaticObjectByName(spl[1]), pac.getItemByName(spl[0]))
+                        desc = pac.use_static_object(pac.get_static_object_by_name(spl[1]), pac.get_item_by_name(spl[0]))
                     except NotImplementedError:
                         return
 
                 if not desc:
                     return
 
-                print(desc)
+                wraptext(desc)
 
             elif inp.startswith("combine"):
                 # Finds the two Item objects
@@ -988,21 +1002,21 @@ class TextInterface(metaclass=Singleton):
                     return
 
                 try:
-                    craftdesc = pac.combine(sr[0].strip(" "), sr[1].strip(" "))
+                    crafting_desc = pac.combine(sr[0].strip(" "), sr[1].strip(" "))
                 except NotImplementedError:
                     return
 
-                if not craftdesc:
-                    print(pac.dfailcombine)
+                if not crafting_desc:
+                    wraptext(pac.d_failed_combine)
                     return
 
-                print(craftdesc)
+                wraptext(crafting_desc)
 
             # Displays items in your inventory
             elif inp.startswith(("inventory", "inv")):
                 # Converts items to a list of names
                 items = []
-                for it in pac.getInventory():
+                for it in pac.get_inventory():
 
                     # Just for the correct grammar jk
                     if str(it.name).startswith(("a", "e", "i", "o", "u")):
@@ -1020,18 +1034,18 @@ class TextInterface(metaclass=Singleton):
                     print("You have " + items[0])
 
                 elif len(items) == 2:
-                    print("You have " + items[0] + " and " + items[1])
+                    wraptext("You have " + items[0] + " and " + items[1])
 
                 else:
-                    print("You have " + ", ".join(items))
+                    wraptext("You have " + ", ".join(items))
 
             # Tells you what room you are currently in
             elif inp.startswith(("where am i", "where", "room")):
-                print("You are in the " + str(pac.getCurrentRoom().name))
+                wraptext("You are in the " + str(pac.get_current_room().name))
 
             # Saves the game
             elif inp.startswith(("save", "save game", "do a save", "gamesave")):
-                pac._savegame()
+                pac._save_game()
                 print("Game has been saved.")
 
             # Option to quit game
@@ -1039,9 +1053,9 @@ class TextInterface(metaclass=Singleton):
                 n = str(input("Are you sure?"))
 
                 if str(n).lower().startswith(("yes", "yup", "ye", "sure", "y")):
-                    c = str(input("Would you like to save your current game? y/n "))
-                    if c.lower() == "y":
-                        pac._savegame()
+                    ce = str(input("Would you like to save your current game? y/n "))
+                    if ce.lower() == "y":
+                        pac._save_game()
                         print("Game saved, bye!")
 
                     else:
@@ -1055,44 +1069,54 @@ class TextInterface(metaclass=Singleton):
 
         # Prints the starting message and the usual for the starting room and then enters the 'infinite' loop.
 
-        pac._initsave()  # creates SaveGame instance at pac.saving
-        if pac.saving.hasSave():
+        pac._init_save()  # creates SaveGame instance at pac.saving
+
+        if pac.saving.has_valid_save():
             doit = str(input("A save has been found. Do you want to load the save? y/n "))
 
-            if doit.lower() == "y":
-                pac._loadgame()
+            if doit.lower() == "y" or not doit:
+                pac._load_game()
 
-                if pac.currentroom.music:
-                    pac._startMusicThread(pac.currentroom.music)
+                # Start music if the room has it
+                if pac.current_room.music:
+                    pac._start_music_thread(pac.currentroom.music)
 
                 print("Save loaded.")
-            elif doit.lower() == "n":
+
+            # Require confirmation
+            elif doit.lower() == "n" or doit:
                 c = input("Are you sure? With next save all your progress will be lost. y (continue) / n (load save anyway) ")
                 if c.lower() == "n":
-                    pac._loadgame()
+                    pac._load_game()
 
                     if pac.currentroom.music:
-                        pac._startMusicThread(pac.currentroom.music)
+                        pac._start_music_thread(pac.currentroom.music)
 
                     print("Save loaded.")
 
                 else:
                     pass
 
-        print(pac.startingmessage + "\n\n" + getRoomHeader(pac.currentroom.name) + "\n" + pac.currentroom.enter())
+            else:
+                log.warn("Got unexpected response.")
+
+        print(pac.starting_message + "\n" + get_room_header(pac.current_room.name))
+        wraptext(pac.current_room.enter())
 
         while self.running:  # Defaults to True, creates an infinite loop until exiting
 
-            if self.savec >= 4 and self.autosave is True:
-                pac._savegame()
-                self.savec = 0
+            if self.save_count >= 4 and self.autosave is True:
+                pac._save_game()
+                self.save_count = 0
 
-            textadventure()
-            self.savec += 1
+            text_adventure()
+            self.save_count += 1
 
         # Code never reaches this point... probably (except when quitting)
 
 # Main class
+
+
 class PaCInterpreter(metaclass=Singleton):
     """
     The interpreter, linking together all objects and your code.
@@ -1118,110 +1142,131 @@ class PaCInterpreter(metaclass=Singleton):
         self.visits = []
         self.links = {}
 
-        self.currentroom = None
-        self.roombeforethisone = None
+        self.current_room = None
+        self.previous_room = None
 
-        self.startingroom = None
-        self.startingmessage = None
+        self.starting_room = None
+        self.starting_message = None
 
         self.running = False
 
         # Defaults (default pick up is defined in createItem)
-        self.defaultuse = "Hmm..."
-        self.defaultfaileduse = "Hmm..."
-        self.defaultfailedpickup = "I can't do that."
-        self.defaultfailedcombine = "Can't do that..."
+        self.d_use = "Hmm..."
+        self.d_failed_use = "Hmm..."
+        self.d_failed_pickup = "I can't do that."
+        self.d_failed_combine = "Can't do that..."
 
-        self.musicthread = None
+        self.music_thread = None
         self.events = None
 
         self.autosave = autosave
 
-    def _setEventDispatcher(self, eventdispatcher):
+    def _set_event_dispatcher(self, event_dispatcher):
         """
-        DEPRECATED, EventDispatcher is now a singleton so setting one is not needed
+        !DEPRECATED!
+        EventDispatcher is now a singleton so setting one is not needed
         Associates the instance of EventDispatcher with PacInterpreter
-        :param eventdispatcher: an instance of EventDispatcher (optional)
+        :param event_dispatcher: an instance of EventDispatcher (optional)
         :return: None
         """
-        if not isinstance(eventdispatcher, EventDispatcher):
+        if not isinstance(event_dispatcher, EventDispatcher):
             raise InvalidParameters
 
-        self.events = eventdispatcher
+        self.events = event_dispatcher
 
-    def start(self, askforsave=True):
+    def start(self, ask_for_save=True):
         """
-        Starts the adventure with you in the default room and the starting message. If you have not defined a starting room or message, MissingParameters will be raised.
+        Starts the adventure with you in the default room and the starting message.
+        If you have not defined a starting room or message, MissingParameters will be raised.
         :return: None
         """
         self.running = True
-        self.currentroom = self.startingroom
-
+        self.current_room = self.starting_room
 
         mixer.init()  # Inits the mixer module (for Music)
 
         if not self.events:
             self.events = EventDispatcher()
 
-        self.events.dispatchEvent(START)
+        self.events.dispatch_event(START)
 
-        if not self.startingroom or not self.startingmessage:
+        if not self.starting_room or not self.starting_message:
             raise MissingParameters
 
-        self.visits.append(self.currentroom)
+        self.visits.append(self.current_room)
 
         # Instances the TextInterface class (no need for it to be class-wide for now)
-        textinterface = TextInterface(autosave=self.autosave)
+        text_interface = TextInterface(autosave=self.autosave)
 
         # If the starting room has music, start playing.
-        if self.startingroom.music:
-            self._startMusicThread(self.startingroom.music)
+        if self.starting_room.music:
+            self._start_music_thread(self.starting_room.music)
 
-        # With this the TextInterface has the access to the class - the 'story'. Prints the starting message and begins the while True loop.
-        textinterface.beginAdventure(self)
+        # With this the TextInterface has the access to the class - the 'story'.
+        # Prints the starting message and begins the while True loop.
 
-    def setDefaultUseFailMessage(self, message):
+        text_interface.begin_adventure(self)
+
+    def set_default_use_fail_message(self, message):
         """
         Sets the default message to return when not being able to use an item (when not overridden by Item specific fail message).
         :param message: string
         :return: None
         """
-        self.defaultfaileduse = str(message)
+        self.d_failed_use = str(message)
 
-    def setDefaultPickUpFailMessage(self, message):
+    def set_default_pick_up_fail_message(self, message):
         """
         Sets the default message to return when not being able to pick up an item (when not overridden by Item specific fail message).
         :param message: string
         :return: None
         """
-        self.defaultfailedpickup = str(message)
+        self.d_failed_pickup = str(message)
 
-    def setDefaultCombineFailMessage(self, message):
+    def set_default_combine_fail_message(self, message):
         """
         Sets the default message for when failed to combine.
         :param message: string
         :return: None
         """
-        self.defaultfailedcombine = str(message)
+        self.d_failed_combine = str(message)
 
-    def setDefaultUseMessage(self, message):
+    def set_default_use_message(self, message):
         """
         Sets the default message for when using an item (when not overridden by item specific use message)
         :param message:
         :return:
         """
-        self.defaultuse = str(message)
+        self.d_use = str(message)
 
-    def setStartingMessage(self, message):
+    def set_starting_message(self, message):
         """
         Sets the starting message. Necessary before calling start().
         :param message: string
         :return: None
         """
-        self.startingmessage = str(message)
+        self.starting_message = str(message)
+
+    @staticmethod
+    def set_textwrap_length(length):
+        """
+        Defaults to 65.
+        :param length: int
+        :return: None
+        """
+        global PADDING
+        PADDING = int(length)
+
+    def set_autosave(self, action):
+        """
+        Enables or disabled autosave.
+        :param action: bool
+        :return: None
+        """
+        self.autosave = bool(action)
 
 
-    def getrooms(self):
+    def get_rooms(self):
         """
         Returns a dictionary of rooms created.
         {room name : Room object, ...}
@@ -1229,24 +1274,24 @@ class PaCInterpreter(metaclass=Singleton):
         """
         return self.rooms
 
-    def getCurrentRoom(self):
+    def get_current_room(self):
         """
         Returns the current room.
         :return: Room object
         """
-        if not self.currentroom:
+        if not self.current_room:
             raise NotImplementedError
 
-        return self.currentroom
+        return self.current_room
 
-    def getInventory(self):
+    def get_inventory(self):
         """
         Returns a list of Items in the players inventory.
         :return: list of Items
         """
         return list(self.inv)
 
-    def getRoomByName(self, name):
+    def get_room_by_name(self, name):
         """
         Returns the Room by its name.
         :param name: room name string
@@ -1254,7 +1299,7 @@ class PaCInterpreter(metaclass=Singleton):
         """
         return self.rooms[str(name)]
 
-    def getItemByName(self, item):
+    def get_item_by_name(self, item):
         """
         Returns the Item by its name. Raises NotImplementedError if the item does not exist.
         :param item: item name string
@@ -1265,7 +1310,7 @@ class PaCInterpreter(metaclass=Singleton):
         except KeyError:
             raise NotImplementedError
 
-    def getStaticObjectByName(self, obj):
+    def get_static_object_by_name(self, obj):
         """
         Returns the StaticObject by its name. Raises NotImplementedError if the item does not exist
         :param obj: object name string
@@ -1277,12 +1322,12 @@ class PaCInterpreter(metaclass=Singleton):
             raise NotImplementedError
 
 
-    def createRoom(self, name, desc, onfirstenterdesc=None, starting=False):
+    def create_room(self, name, desc, on_first_enter=None, starting=False):
         """
         Creates a Room with supplied properties.
         :param name: room name
         :param desc: room description
-        :param onfirstenterdesc: descrption to be displayed when entering the room for the first time
+        :param on_first_enter: description to be displayed when entering the room for the first time
         :param starting: bool indicating if the room should be the starting one
         :return: created Room object
         """
@@ -1292,110 +1337,115 @@ class PaCInterpreter(metaclass=Singleton):
         if name in self.rooms:
             raise AlreadyExists
 
-        room = Room(name, desc, onfirstenterdesc, starting)
+        room = Room(name, desc, on_first_enter, starting)
         self.rooms[str(name)] = room
 
         if starting:
-            self.startingroom = room
+            self.starting_room = room
 
         return room
 
-    def createItem(self, name, desc, onuse=None, faileduse=None, failedpickup=None, onpickup=None, craftable=False, craftingdesc=None):
+    def create_item(self, name, desc, on_use=None, failed_use=None, failed_pickup=None, on_pickup=None, is_craftable=False, crafting_desc=None):
         """
-        Creates an Item with supplied properties. All parameters have to be strings. IF onuse is not supplied, the item is 'literally' unusable, printing "hmmm..." on use.
+        Creates an Item with supplied properties. All parameters have to be strings.
+        If on_use is not supplied, the item is 'kinda' unusable, printing "hmmm..." on use.
         :param name: item name
         :param desc: item description
-        :param onuse: string to be displayed when using the item
-        :param faileduse: string to be displayed when not being able to use the item
-        :param failedpickup: string to be displayed when not being able to pick up the item
-        :param onpickup: string to be displayed when picking up the item
+        :param on_use: string to be displayed when using the item
+        :param failed_use: string to be displayed when not being able to use the item
+        :param failed_pickup: string to be displayed when not being able to pick up the item
+        :param on_pickup: string to be displayed when picking up the item
+        :param is_craftable: bool
+        :param crafting_desc: str to display when this item is crafted
         :return: created Item object
         """
         if not name or not desc:
             raise InvalidParameters
 
-        if not onuse:
-            onuse = self.defaultuse
+        if not on_use:
+            on_use = self.d_use
 
-        if not onpickup:
-            onpickup = "You picked up {}".format(str(name))
+        if not on_pickup:
+            on_pickup = "You picked up {}".format(str(name))
 
-        if not faileduse:
-            faileduse = self.defaultfaileduse
+        if not failed_use:
+            failed_use = self.d_failed_use
 
-        if not failedpickup:
-            failedpickup = self.defaultfailedpickup
+        if not failed_pickup:
+            failed_pickup = self.d_failed_pickup
 
-        if not craftingdesc:
-            craftingdesc = "By combining you created a {}".format(str(name))
+        if not crafting_desc:
+            crafting_desc = "By combining you created a {}".format(str(name))
 
-        obj = Item(name, desc, onuse, faileduse, failedpickup, onpickup, craftable, craftingdesc)
+        obj = Item(name, desc, on_use, failed_use, failed_pickup, on_pickup, is_craftable, crafting_desc)
 
         # 'Registers' the object for getItemByName()
         self.items[obj.name] = obj
         return obj
 
-    def createBlueprint(self, item1, item2, finalitem):
+    def create_blueprint(self, item1, item2, final_item):
         """
-        Creates a blueprint for combining two items together to make another item which also has to be the Item object. The order does not matter.
+        Creates a blueprint for combining two items together to make another item which also has to be the Item object.
+        The order does not matter.
         :param item1: First Item object to combine
         :param item2: Second Item object to combine
-        :param finalitem: Item object that will be the result
+        :param final_item: Item object that will be the result
         :return: None
         """
         # Converts from str to Item objects if needed
         if not isinstance(item1, Item):
-            item1 = self.getItemByName(item1)
+            item1 = self.get_item_by_name(item1)
 
         if not isinstance(item2, Item):
-            item2 = self.getItemByName(item2)
+            item2 = self.get_item_by_name(item2)
 
-        if not isinstance(finalitem, Item):
-            finalitem = self.getItemByName(finalitem)
+        if not isinstance(final_item, Item):
+            final_item = self.get_item_by_name(final_item)
 
         # Done converting, now append the blueprint to self.blueprints in the form of tuple
-        app = (item1, item2, finalitem)
+        app = (item1, item2, final_item)
         self.blueprints.append(app)
 
-    def createStaticItem(self, name, display, onuse=None, faileduse=None):
+    def create_static_item(self, name, display, on_use=None, failed_use=None):
         """
-        Creates a StaticObject that can 'sit' in the room and be interacted with. It can not be picked up, but can be used with/without special items.
+        Creates a StaticObject that can 'sit' in the room and be interacted with.
+        It can not be picked up, but can be used with/without special items.
         :param name: object name
         :param display: string that will be displayed when the object is in the room
-        :param onuse: string that will be displayed when using the object without special items.
-        :param faileduse: displayed when not able to use the object
+        :param on_use: string that will be displayed when using the object without special items.
+        :param failed_use: displayed when not able to use the object
         :return: StaticObject object
         """
         if not name or not display:
             raise InvalidParameters
 
-        if not onuse:
-            onuse = self.defaultuse
+        if not on_use:
+            on_use = self.d_use
 
-        if not faileduse:
-            faileduse = self.defaultfaileduse
+        if not failed_use:
+            failed_use = self.d_failed_use
 
-        obj = StaticObject(name, display, onuse, faileduse)
+        obj = StaticObject(name, display, on_use, failed_use)
         self.statics[name] = obj
 
         return obj
 
-    def combine(self, itemone, itemtwo):
+    def combine(self, item1, item2):
         """
         Combines two items together is there is a blueprint for the combination.
-        :param itemone: Item object or item name
-        :param itemtwo: Item object or item name
+        :param item1: Item object or item name
+        :param item2: Item object or item name
         :return: Combined item (Item)
         """
         # Converts to Item objects if needed
-        if not isinstance(itemone, Item):
-            itemone = self.getItemByName(itemone)
+        if not isinstance(item1, Item):
+            item1 = self.get_item_by_name(item1)
 
-        if not isinstance(itemtwo, Item):
-            itemtwo = self.getItemByName(itemtwo)
+        if not isinstance(item2, Item):
+            item2 = self.get_item_by_name(item2)
 
         # Checks existence in inventory
-        if not ((itemone in self.inv) and (itemtwo in self.inv)):
+        if not ((item1 in self.inv) and (item2 in self.inv)):
             return False
 
         # Shifts through blueprints
@@ -1403,27 +1453,27 @@ class PaCInterpreter(metaclass=Singleton):
             item1 = blue[0]
             item2 = blue[1]
 
-            if (itemone == item1 and itemtwo == item2) or (itemone == item2 and itemtwo == item1):
+            if (item1 == item1 and item2 == item2) or (item1 == item2 and item2 == item1):
                 result = blue[2]
                 self.inv.pop(c)
                 self.inv.pop(c)
 
-                self.putIntoInv(result)
+                self.put_into_inv(result)
 
                 # Dispatch event
-                self.events.dispatchEvent(COMBINE, item1=item1, item2=item2, result=result)
+                self.events.dispatch_event(COMBINE, item1=item1, item2=item2, result=result)
 
                 return result.craft()
 
         return False
 
 
-    def linkroom(self, room1, room2, twoway=False):
+    def link_room(self, room1, room2, two_way=False):
         """
         Links two rooms together (one-way or two-way).
         :param room1: Room to link from
         :param room2: Room to link to
-        :param twoway: Defaults to False, indicates of the path should be two-way
+        :param two_way: Defaults to False, indicates of the path should be two-way
         :return: None
         """
         if not isinstance(room1, Room) or not isinstance(room2, Room):
@@ -1437,8 +1487,8 @@ class PaCInterpreter(metaclass=Singleton):
             self.links[room1.name] = []
             self.links[room1.name].append(room2.name)
 
-        # Second link, if twoway is True
-        if twoway:
+        # Second link, if two_way is True
+        if two_way:
             try:
                 self.links[room2.name].append(room1.name)
 
@@ -1447,7 +1497,7 @@ class PaCInterpreter(metaclass=Singleton):
                 self.links[room2.name].append(room1.name)
 
     @staticmethod
-    def putitem(room, item, description):
+    def put_item(room, item, description):
         """
         Puts an item into a room.
         :param room: Room to put the Item into
@@ -1458,9 +1508,10 @@ class PaCInterpreter(metaclass=Singleton):
         if not isinstance(room, Room) or not isinstance(item, Item):
             raise InvalidParameters
 
-        room.putitem(item, description)
+        room.put_item(item, description)
 
-    def putstaticobject(self, room, obj):
+    @staticmethod
+    def put_static_item(room, obj):
         """
         Puts a StaticObject into a room. (description is provided by StaticObject.display string)
         :param room: Room to put the StaticObject into
@@ -1470,9 +1521,9 @@ class PaCInterpreter(metaclass=Singleton):
         if not isinstance(room, Room) or not isinstance(obj, StaticObject):
             raise InvalidParameters
 
-        room.putstatic(obj, obj.display)
+        room.put_static_obj(obj, obj.display)
 
-    def putIntoInv(self, item):
+    def put_into_inv(self, item):
         """
         Puts an Item into your inventory.
         :param item: Item to put
@@ -1483,11 +1534,11 @@ class PaCInterpreter(metaclass=Singleton):
 
         self.inv.append(item)
 
-    def pickUpItem(self, item):
+    def pick_up_item(self, item):
         """
         Picks up the item in the current room.
         :param item:
-        :return: False if failed, item onpickup string if successful.
+        :return: False if failed, item on_pickup string if successful.
         """
         # Converts string to Item if needed
         if not isinstance(item, Item):
@@ -1497,28 +1548,28 @@ class PaCInterpreter(metaclass=Singleton):
             except KeyError:
                 return False
 
-        if not item == self.currentroom.items.get(item.name):
+        if not item == self.current_room.items.get(item.name):
             return False
 
-        if not item.hasPickUpRequirements(self.inv):
+        if not item.has_pick_up_requirements(self.inv):
             if item.onfaileduse is not None:
-                return str(item.onfailedpickup)
+                return str(item.on_failed_pickup)
             else:
-                return self.defaultfailedpickup
+                return self.d_failed_pickup
 
-        it = self.currentroom.pickUpItem(item)
-        self.events.dispatchEvent(PICKUP, item=item, desc=it)
+        it = self.current_room.pick_up_item(item)
+        self.events.dispatch_event(PICKUP, item=item, desc=it)
 
-        thatitem = self.items[item.name]
-        self.putIntoInv(thatitem)
+        that_item = self.items[item.name]
+        self.put_into_inv(that_item)
 
         return it
 
-    def useItem(self, item):
+    def use_item(self, item):
         """
         Uses an Item in your inventory
         :param item: Item to use
-        :return: False if failed, Item onuse string is successful
+        :return: False if failed, Item on_use string is successful
         """
         if not isinstance(item, Item):
             raise InvalidParameters
@@ -1527,18 +1578,18 @@ class PaCInterpreter(metaclass=Singleton):
             return False
 
         else:
-            if not item.hasUseRequirements(self.inv):
+            if not item.has_use_requirements(self.inv):
 
-                if item.onfaileduse is not None:
-                    return str(item.onfaileduse)
+                if item.on_failed_use is not None:
+                    return str(item.on_failed_use)
                 else:
-                    return self.defaultfaileduse
+                    return self.d_failed_use
 
             desc = item.use()
-            self.events.dispatchEvent(USE_ITEM, item=item, desc=desc)
+            self.events.dispatch_event(USE_ITEM, item=item, desc=desc)
             return desc
 
-    def useStaticObject(self, obj, item=None):
+    def use_static_object(self, obj, item=None):
         """
         Uses the StaticObject in the room.
         :param obj: StaticObject
@@ -1548,27 +1599,27 @@ class PaCInterpreter(metaclass=Singleton):
         if not isinstance(obj, StaticObject):
             raise InvalidParameters
 
-        if obj not in self.currentroom.getStatics():
+        if obj not in self.current_room.get_static_items():
             return False
 
         else:
-            if not obj.hasItemRequirements(self.inv):
+            if not obj.has_item_requirements(self.inv):
 
-                if obj.onfaileduse is not None:
-                    return str(obj.onfaileduse)
+                if obj.on_failed_use is not None:
+                    return str(obj.on_failed_use)
                 else:
-                    return self.defaultfaileduse
+                    return self.d_failed_use
 
             if not item:
                 if obj.music:
-                    self._startMusicThread(obj.music)
+                    self._start_music_thread(obj.music)
                 desc = obj.use()
             else:
                 if obj.music:
-                    self._startMusicThread(obj.music)
-                desc = obj.useWithItem(item)
+                    self._start_music_thread(obj.music)
+                desc = obj.use_with_item(item)
 
-            self.events.dispatchEvent(USE_OBJECT, object=obj, desc=desc)
+            self.events.dispatch_event(USE_OBJECT, object=obj, desc=desc)
             return desc
 
     def walk(self, room):
@@ -1579,44 +1630,36 @@ class PaCInterpreter(metaclass=Singleton):
         :return: Room onenter string if everything is okay, a list with one item in a string of not
         """
 
-        # Gets the Room object
-        if isinstance(room, Room):
-            pass
-
-        else:
+        # Gets the Room object if needed
+        if not isinstance(room, Room):
             try:
                 room = self.rooms[str(room)]
             except KeyError:
                 raise NotImplementedError
 
+        # Starts the music if the room has one
         if room.music:
-            if not self.musicthread == room.music:
-                self._startMusicThread(room.music)
+            if not self.music_thread == room.music:
+                self._start_music_thread(room.music)
 
-        try:
-            if not room.name in self.links[self.currentroom.name]:
-                raise NotLinked
-
-        except KeyError:
+        # Raise NotLinked if the room does not have a link to the specified one
+        if room.name not in self.links.get(self.current_room.name):
             raise NotLinked
 
-        except AttributeError:
-            raise MissingParameters
-
         # Processes requirements
-        itemr = room.hasItemRequirements(self.inv)
-        roomr = room.hasVisitRequirement(self.visits)
+        itemr = room.has_item_requirements(self.inv)
+        roomr = room.has_visit_requirement(self.visits)
 
         if itemr or roomr:
-            self.events.dispatchEvent(ENTER, fr=self.currentroom, to=room, first_time=not room.firstenter)
+            self.events.dispatch_event(ENTER, fr=self.current_room, to=room, first_time=not room.entered)
 
         if itemr == 1:
             if roomr == 1:  # Only if everything is fulfilled, return room description
                 desc = room.enter()
 
                 # Sets current room and the one you were just in
-                self.roombeforethisone = self.currentroom
-                self.currentroom = room
+                self.previous_room = self.current_room
+                self.current_room = room
 
                 self.visits.append(room)
 
@@ -1633,24 +1676,24 @@ class PaCInterpreter(metaclass=Singleton):
             else:  # Both are not fulfilled, return str of both
                 return [str(str(itemr) + "\n" + str(roomr))]
 
-    def goback(self):
+    def go_back(self):
         """
         Moves the player back to the previous room.
-        :return: Same as walk() method (Room onenter string if everything is okay, a list with one item in a string of not)
+        :return: Same as walk() method (Room on_enter string if everything is okay, a list with one item in a string of not)
         """
-        if not self.roombeforethisone:
+        if not self.previous_room:
             raise NotImplementedError
 
-        return self.walk(self.roombeforethisone)
+        return self.walk(self.previous_room)
 
     def ways(self):
         """
         Returns a list of links (ways/paths) from the current room.
         :return - list of links
         """
-        room = self.currentroom
+        room = self.current_room
 
-        if not self.currentroom or not isinstance(self.currentroom, Room):
+        if not self.current_room or not isinstance(self.current_room, Room):
             raise MissingParameters
 
         try:
@@ -1658,9 +1701,10 @@ class PaCInterpreter(metaclass=Singleton):
         except KeyError:
             return []
 
-    def addMusic(self, music, place):
+    def add_music(self, music, place):
         """
-        Adds music to be played when entering a room or interacting with a StaticObject. Music does NOT stop playing when moving to a room without music!
+        Adds music to be played when entering a room or interacting with a StaticObject.
+        Music does NOT stop playing when moving to a room without music!
         :param music: str or Music
         :param place: Room or StaticObject
         :return: None
@@ -1677,10 +1721,10 @@ class PaCInterpreter(metaclass=Singleton):
         if not (isinstance(place, Room) or isinstance(place, StaticObject)):
             raise InvalidParameters
 
-        place.addMusic(music)
+        place.add_music(music)
 
     @threaded
-    def _startMusicThread(self, music, repeat=True):
+    def _start_music_thread(self, music, repeat=True):
         """
         Starts the music, stopping any existing threads.
         :param music: Music
@@ -1690,37 +1734,72 @@ class PaCInterpreter(metaclass=Singleton):
             raise InvalidParameters
 
         try:
-            self.musicthread.stop()
+            self.music_thread.stop()
         except AttributeError:
             pass
 
-        self.musicthread = music
-        self.lastmusicthread = music
-        self.musicthread.__init__(self.musicthread.path)
+        self.music_thread = music
+        self.last_music_thread = music
+        self.music_thread.__init__(self.music_thread.path)
 
-        self.events.dispatchEvent(MUSIC_CHANGE, music=music, path=music.path)
-        self.musicthread.start(repeat)
+        self.events.dispatch_event(MUSIC_CHANGE, music=music, path=music.path)
+        self.music_thread.start(repeat)
 
-    def _savegame(self):
+    def _save_game(self):
         """
-        Saves the current state of the game to save/nameofthegame.save
+        Saves the current state of the game to save/name_of_the_game.save
         :return: None
         """
-        self.saving.save([self.currentroom, self.roombeforethisone, self.inv])
+        if not self.saving:
+            self._init_save()
 
-    def _initsave(self):
-        self.saving = SaveGame(self.name)
+        rooms = {k: r for k, r in self.rooms.items()}
+        items = {k: r for k, r in self.items.items()}
+        statics = {k: r for k, r in self.statics.items()}
 
-    def _loadgame(self):
-        if self.saving.hasSave():
-            room, oneback, inv = self.saving.load()
+        inv = self.inv
+        visited = self.visits
 
-            if not isinstance(room, Room):
-                room = self.getRoomByName(room)
-            self.currentroom = room
+        data = {
+            "state": {"rooms": rooms, "items": items, "statics": statics, "inventory": inv, "visits": visited},
+            "game_info": {"name": self.name, "version": self.version}
+        }
 
-            if not isinstance(oneback, Room):
-                oneback = self.getRoomByName(oneback)
-            self.roombeforethisone = oneback
+        self.saving.save(data)
 
-            self.inv = inv
+    def _init_save(self):
+        self.saving = SaveGame(self.name, self.version)
+
+    def _load_game(self):
+        if not self.saving:
+            self._init_save()
+
+        if self.saving.has_valid_save():
+            data = self.saving.load()
+
+            # has_valid_save() should check for this, but we check again
+            if data.get("game_info").get("version") != self.version:
+                log.warning("Game version is not the same even though has_valid_save() reported so! Not loading the save!")
+                return
+
+            game_info = data.get("game_info")
+            game_state = data.get("state")
+
+            if not game_info or not game_state:
+                log.error("Game save is corrupt.")
+                # User should delete the save him/herself.
+                return
+
+            self.rooms = game_state.get("rooms")
+            self.items = game_state.get("items")
+            self.statics = game_state.get("statics")
+
+            self.inv = game_state.get("inventory")
+            self.visits = game_state.get("visits")
+
+            self.current_room = game_state.get("rooms").get(self.current_room.name)
+
+            try:
+                self.previous_room = game_state.get("rooms").get(self.previous_room.name)
+            except AttributeError:
+                pass

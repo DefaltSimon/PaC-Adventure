@@ -1,3 +1,10 @@
+0.4.1
+- Major refactorings! Mostly changes from camelCase to snake_case
+- Small optimizations and bugfixes
+- Fixed game saving - now saves all rooms and objects
+- Added text wrapping (a custom width can be set)
+- Added a main exception type, with which all other exceptions are subclassed
+
 0.4
 - Game saving implemented
 - PaCInterpreter, TextInterface and EventHandler are now singletons, allowing for simpler event registering
