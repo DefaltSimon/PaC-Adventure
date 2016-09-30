@@ -1,5 +1,5 @@
 # PaC-Adventure  
-
+![MIT](https://img.shields.io/badge/license-MIT-yellow.svg)  
 A library for creating a text-based story.
 ---
 ###Features include:
