@@ -1,6 +1,9 @@
 # coding=utf-8
+"""
+PaC Adventure Creator
+A library for creating a text-based interactive story.
+"""
 
-# This is the PaC Interpreter
 import logging
 import pickle
 import threading
@@ -11,7 +14,7 @@ import textwrap
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-# Imports
+# Check for pygame
 try:
     from pygame import mixer
 except ImportError:
@@ -19,9 +22,10 @@ except ImportError:
     logging.warn("pygame is not installed, music will NOT work.")
 
 __author__ = "DefaltSimon"
-__version__ = "0.4.1dev"
+__version__ = "0.4.2"
 
-# Constants
+# EVENTS
+# DEPRECATED, use decorators!
 PICKUP = "pickup"
 USE_ITEM = "use-item"
 USE_OBJECT = "use-object"
@@ -32,6 +36,7 @@ MUSIC_CHANGE = "music"
 
 # Total length of the room name header
 PADDING = 65
+tw = None
 
 # For simple threading
 
@@ -49,7 +54,7 @@ def update_textwrap():
 update_textwrap()
 
 
-def wraptext(s):
+def wrap_text(s):
     if tw.width != PADDING:
         update_textwrap()
 
@@ -63,42 +68,43 @@ def get_wrap(s):
     return textwrap.fill(s, PADDING)
 
 
-def save(fn):
-    fn.__self__.save.save(fn.__self__.currentroom, fn.__self__.roombeforethisone, fn.__self__.inv)
-    return fn
+# What have I done
+# def save(fn):
+#     fn.__self__.save.save(fn.__self__.currentroom, fn.__self__.roombeforethisone, fn.__self__.inv)
+#     return fn
 
 # Exception classes
 
 
-class InterpreterException(Exception):
+class PacException(Exception):
     """
     General exception class, other exceptions are subclassed to this.
     """
     pass
 
 
-class MissingParameters(InterpreterException):
+class MissingParameters(PacException):
     """
     Thrown when some parameters are missing.
     """
     pass
 
 
-class InvalidParameters(InterpreterException):
+class InvalidParameters(PacException):
     """
     To be expected when an invalid variable type was passed.
     """
     pass
 
 
-class NotLinked(InterpreterException):
+class NotLinked(PacException):
     """
     Thrown when a room you tried to enter is not liked to the current room.
     """
     pass
 
 
-class AlreadyExists(InterpreterException):
+class AlreadyExists(PacException):
     """
     Raised when an Item or Room with the same name already exist.
     """
@@ -121,11 +127,11 @@ class Singleton(type):
 
 class Music:
     """
-    Represents the Music that is played when entering a room or interacting with an object.
+    Represents the music that is played when entering a room or interacting with an object.
     """
     def __init__(self, path):
         """
-        Inits the Music.
+        Initializes the Music: checks presence of the file path and music compatibility.
         :param path: path to file
         :return: None
         """
@@ -133,7 +139,7 @@ class Music:
             return
 
         if not os.path.isfile(path):
-            print("[ERROR] {} is not a file or does not exist!".format(path))
+            log.error("{} does not exist.".format(path))
 
         self.path = str(path)
         # self._keep_alive = threading.Event()
@@ -155,12 +161,17 @@ class Music:
         time.sleep(0.1)
 
     @staticmethod
-    def stop():
+    def stop(ttl=0.5):
         """
-        Sets a flag (Event) to True so the thread quits on next iteration (max time for next iteration: 0.1 s)
+        Stops the music
         :return: None
         """
-        mixer.music.fadeout(500)  # Quits the thread when Event is set to True
+        if not isinstance(ttl, (int, float)):
+            raise InvalidParameters
+
+        mixer.music.fadeout(ttl * 1000)  # Non-blocking
+        time.sleep(ttl)  # Should wait for the same amount
+
         return
 
 # Room Object
@@ -534,6 +545,7 @@ class StaticObject(object):
         """
         :return: on_use string
         """
+        self.used = True
         return self.on_use
 
     def use_with_item(self, item):
@@ -557,6 +569,13 @@ class StaticObject(object):
         :return: display string
         """
         return self.display
+
+    def look_at(self):
+        """
+        Just an alias for take_notice()
+        :return: display string
+        """
+        return self.take_notice()
 
     def has_item_requirements(self, items):
         """
@@ -617,6 +636,7 @@ class StaticObject(object):
 class EventDispatcher(metaclass=Singleton):
         """
         The event handler/dispatcher for PaC
+        It is a Singleton (can only have one instance)
         """
         def __init__(self):
             self.events = {
@@ -636,26 +656,10 @@ class EventDispatcher(metaclass=Singleton):
             :param fn: function's reference ('doit' NOT 'doit()')
             :return: None
             """
-            if event_type == PICKUP:
-                self.events.get(PICKUP).append(fn)
+            if event_type not in self.events.keys():
+                raise InvalidParameters
 
-            elif event_type == USE_ITEM:
-                self.events.get(USE_ITEM).append(fn)
-
-            elif event_type == USE_OBJECT:
-                self.events.get(USE_OBJECT).append(fn)
-
-            elif event_type == START:
-                self.events.get(START).append(fn)
-
-            elif event_type == COMBINE:
-                self.events.get(COMBINE).append(fn)
-
-            elif event_type == ENTER:
-                self.events.get(ENTER).append(fn)
-
-            elif event_type == MUSIC_CHANGE:
-                self.events.get(MUSIC_CHANGE).append(fn)
+            self.events.get(event_type).append(fn)
 
         def dispatch_event(self, event_type, **kwargs):
             """
@@ -672,31 +676,31 @@ class EventDispatcher(metaclass=Singleton):
                     fn(**kwargs)
 
         # @decorators for fast event registering
-        def ENTER(self, fn):
+        def on_enter(self, fn):
             self._register_event(ENTER, fn)
             return fn
 
-        def PICKUP(self, fn):
+        def on_pickup(self, fn):
             self._register_event(PICKUP, fn)
             return fn
 
-        def USE_ITEM(self, fn):
+        def on_item_use(self, fn):
             self._register_event(USE_ITEM, fn)
             return fn
 
-        def USE_OBJECT(self, fn):
+        def on_object_use(self, fn):
             self._register_event(USE_OBJECT, fn)
             return fn
 
-        def COMBINE(self, fn):
+        def on_combine(self, fn):
             self._register_event(COMBINE, fn)
             return fn
 
-        def START(self, fn):
+        def on_start(self, fn):
             self._register_event(START, fn)
             return fn
 
-        def MUSIC_CHANGE(self, fn):
+        def on_music_change(self, fn):
             self._register_event(MUSIC_CHANGE, fn)
             return fn
 
@@ -773,10 +777,11 @@ class TextInterface(metaclass=Singleton):
     """
     The basic Text interface that the player interacts with.
     """
-    def __init__(self, autosave=True):
+    def __init__(self, autosave=True, ask_for_save=True):
         self.running = True
 
-        self.autosave = autosave
+        self.autosave = bool(autosave)
+        self.ask_for_save = bool(ask_for_save)
         self.save_count = 0
 
     def begin_adventure(self, pac):
@@ -805,11 +810,11 @@ class TextInterface(metaclass=Singleton):
 
             if inp == "help" or inp == "what to do":
                 commands = ["go", "pick up", "use", "inv", "where", "combine", "save", "settings", "exit"]
-                wraptext(", ".join(commands))
+                wrap_text(", ".join(commands))
 
             # Displays possible ways out of the room (DEPRECATED!)
             elif inp.startswith(("ways", "path", "paths", "way")):
-                wraptext("You can go to: " + ", ".join(pac.ways()))
+                wrap_text("You can go to: " + ", ".join(pac.ways()))
 
             elif inp.startswith(("settings", "preferences")):
                 print("1. autosave : {}\n2. exit".format("enabled" if self.autosave else "disabled"))
@@ -849,15 +854,12 @@ class TextInterface(metaclass=Singleton):
                     print("In the room there is " + objects[0] + "\n")
 
                 else:
-                    wraptext("In the room there are " + ", ".join(objects))
+                    wrap_text("In the room there are " + ", ".join(objects))
 
             # Moves the player back to the previous room.
             elif inp.startswith("go back"):
 
                 try:
-                    insert = str(pac.previous_room.name)
-                    # Stores room before calling go_back() method where the room gets changed
-
                     desc = pac.go_back()
 
                 except NotImplementedError or NotLinked or AttributeError:
@@ -865,10 +867,10 @@ class TextInterface(metaclass=Singleton):
 
                 if not isinstance(desc, list):
                     print(get_room_header(pac.current_room))
-                    wraptext(desc)
+                    wrap_text(desc)
 
                 else:
-                    wraptext(desc[0])
+                    wrap_text(desc[0])
 
             # Moves the player to a different room
             elif inp.startswith(("walk ", "go ", "go to ", "walk to ", "walk down ", "go down")):
@@ -891,7 +893,7 @@ class TextInterface(metaclass=Singleton):
                 elif inp.startswith("walk to"):
                     rn = inp[len("walk to "):]
 
-                # Printed when you did "walk [somethingthatisnothere]"
+                # Printed when you do "walk somethingthatisnothere"
                 else:
                     print("Where do you want to go?")
                     return
@@ -909,15 +911,15 @@ class TextInterface(metaclass=Singleton):
                 # Walks and prints
                 try:
                     desc = pac.walk(str(rn))
-                except NotImplementedError or NotLinked:
+                except (NotImplementedError or NotLinked):
                     return
 
                 if not isinstance(desc, list):
                     print(get_room_header(pac.current_room))
-                    wraptext(desc)
+                    wrap_text(desc)
 
                 else:
-                    wraptext(desc[0])
+                    wrap_text(desc[0])
 
             # Picks up the item in the room and puts it into your inventory
             elif inp.startswith("pick up"):
@@ -941,7 +943,7 @@ class TextInterface(metaclass=Singleton):
                     pass
 
                 else:
-                    wraptext(on_use)
+                    wrap_text(on_use)
 
             # Uses the item in your inventory
             elif inp.startswith("use"):
@@ -981,7 +983,7 @@ class TextInterface(metaclass=Singleton):
                 if not desc:
                     return
 
-                wraptext(desc)
+                wrap_text(desc)
 
             elif inp.startswith("combine"):
                 # Finds the two Item objects
@@ -1007,10 +1009,10 @@ class TextInterface(metaclass=Singleton):
                     return
 
                 if not crafting_desc:
-                    wraptext(pac.d_failed_combine)
+                    wrap_text(pac.d_failed_combine)
                     return
 
-                wraptext(crafting_desc)
+                wrap_text(crafting_desc)
 
             # Displays items in your inventory
             elif inp.startswith(("inventory", "inv")):
@@ -1034,14 +1036,14 @@ class TextInterface(metaclass=Singleton):
                     print("You have " + items[0])
 
                 elif len(items) == 2:
-                    wraptext("You have " + items[0] + " and " + items[1])
+                    wrap_text("You have " + items[0] + " and " + items[1])
 
                 else:
-                    wraptext("You have " + ", ".join(items))
+                    wrap_text("You have " + ", ".join(items))
 
             # Tells you what room you are currently in
             elif inp.startswith(("where am i", "where", "room")):
-                wraptext("You are in the " + str(pac.get_current_room().name))
+                wrap_text("You are in the " + str(pac.get_current_room().name))
 
             # Saves the game
             elif inp.startswith(("save", "save game", "do a save", "gamesave")):
@@ -1067,11 +1069,12 @@ class TextInterface(metaclass=Singleton):
                     return
 
 
+        # This part
         # Prints the starting message and the usual for the starting room and then enters the 'infinite' loop.
 
         pac._init_save()  # creates SaveGame instance at pac.saving
 
-        if pac.saving.has_valid_save():
+        if self.ask_for_save and pac.saving.has_valid_save():
             doit = str(input("A save has been found. Do you want to load the save? y/n "))
 
             if doit.lower() == "y" or not doit:
@@ -1101,7 +1104,7 @@ class TextInterface(metaclass=Singleton):
                 log.warn("Got unexpected response.")
 
         print(pac.starting_message + "\n" + get_room_header(pac.current_room.name))
-        wraptext(pac.current_room.enter())
+        wrap_text(pac.current_room.enter())
 
         while self.running:  # Defaults to True, creates an infinite loop until exiting
 
@@ -1121,6 +1124,8 @@ class PaCInterpreter(metaclass=Singleton):
     """
     The interpreter, linking together all objects and your code.
     PaC stands for point and click (adventure) ;)
+
+    Also, it is a Singleton (meaning it can only have one instance)
     """
 
     def __init__(self, name=None, desc=None, version=None, autosave=True):
@@ -1131,7 +1136,7 @@ class PaCInterpreter(metaclass=Singleton):
 
         self.saving = None
 
-        # Game engine stuff
+        # Game 'engine' stuff
         self.rooms = {}
         self.items = {}
         self.statics = {}
@@ -1178,12 +1183,13 @@ class PaCInterpreter(metaclass=Singleton):
         """
         Starts the adventure with you in the default room and the starting message.
         If you have not defined a starting room or message, MissingParameters will be raised.
+        :param: ask_for_save: bool indicating if the user should be asked to load a save (of one is present)
         :return: None
         """
         self.running = True
         self.current_room = self.starting_room
 
-        mixer.init()  # Inits the mixer module (for Music)
+        mixer.init()  # Initializes the mixer module (for Music)
 
         if not self.events:
             self.events = EventDispatcher()
@@ -1196,7 +1202,7 @@ class PaCInterpreter(metaclass=Singleton):
         self.visits.append(self.current_room)
 
         # Instances the TextInterface class (no need for it to be class-wide for now)
-        text_interface = TextInterface(autosave=self.autosave)
+        text_interface = TextInterface(autosave=self.autosave, ask_for_save=ask_for_save)
 
         # If the starting room has music, start playing.
         if self.starting_room.music:
@@ -1647,14 +1653,14 @@ class PaCInterpreter(metaclass=Singleton):
             raise NotLinked
 
         # Processes requirements
-        itemr = room.has_item_requirements(self.inv)
-        roomr = room.has_visit_requirement(self.visits)
+        item_r = room.has_item_requirements(self.inv)
+        room_r = room.has_visit_requirement(self.visits)
 
-        if itemr or roomr:
+        if item_r or room_r:
             self.events.dispatch_event(ENTER, fr=self.current_room, to=room, first_time=not room.entered)
 
-        if itemr == 1:
-            if roomr == 1:  # Only if everything is fulfilled, return room description
+        if item_r == 1:
+            if room_r == 1:  # Only if everything is fulfilled, return room description
                 desc = room.enter()
 
                 # Sets current room and the one you were just in
@@ -1666,15 +1672,15 @@ class PaCInterpreter(metaclass=Singleton):
                 return desc
 
             else:  # Return room deny message
-                return [roomr]
+                return [room_r]
 
         else:  # Item is not correct, branch out
 
-            if roomr == 1:  # If room requirements are okay, return only item deny message
-                return [itemr]
+            if room_r == 1:  # If room requirements are okay, return only item deny message
+                return [item_r]
 
             else:  # Both are not fulfilled, return str of both
-                return [str(str(itemr) + "\n" + str(roomr))]
+                return [str(str(item_r) + "\n" + str(room_r))]
 
     def go_back(self):
         """
@@ -1701,7 +1707,8 @@ class PaCInterpreter(metaclass=Singleton):
         except KeyError:
             return []
 
-    def add_music(self, music, place):
+    @staticmethod
+    def add_music(music, place):
         """
         Adds music to be played when entering a room or interacting with a StaticObject.
         Music does NOT stop playing when moving to a room without music!
@@ -1779,7 +1786,7 @@ class PaCInterpreter(metaclass=Singleton):
 
             # has_valid_save() should check for this, but we check again
             if data.get("game_info").get("version") != self.version:
-                log.warning("Game version is not the same even though has_valid_save() reported so! Not loading the save!")
+                log.warn("Game version is not the same even though has_valid_save() reported so! Not loading the save!")
                 return
 
             game_info = data.get("game_info")
@@ -1803,3 +1810,7 @@ class PaCInterpreter(metaclass=Singleton):
                 self.previous_room = game_state.get("rooms").get(self.previous_room.name)
             except AttributeError:
                 pass
+
+
+# Shortcuts for convenience
+Story = PaCInterpreter

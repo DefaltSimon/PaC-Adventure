@@ -48,11 +48,11 @@ pac.set_starting_message("This example features event registering and handling.\
 # PaC-Adventure also has an event handling module (implemented in 0.3)
 events = EventDispatcher()
 
-@events.START
+@events.on_start
 def on_start():
     print("Game has started.")
 
-@events.ENTER
+@events.on_enter
 def on_enter(**kwargs):
     print("Went from {} to {} (First time: {}).".format(kwargs.get("fr").name, kwargs.get("to").name, kwargs.get("first_time")))
 

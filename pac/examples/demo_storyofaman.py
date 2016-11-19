@@ -1,6 +1,6 @@
 # coding=utf-8
 """
-This is an example of what can the interpreter do. Not everything is covered, but most for the 0.4.1 version is.
+This is an example of what can the interpreter do. Not everything is covered, but most for the 0.4 version is.
 
 It all works like this:
 
@@ -123,14 +123,16 @@ pac.link_room(room3, room4, True)
 pac.link_room(room3, room5, True)
 
 
-pac.put_item(room1, item1, "There is a phone on the table.")  # You must also add a description that will be displayed when this item is in the room.
+pac.put_item(room1, item1, "There is a phone on the table.")
+# You must also add a description that will be displayed when this item is in the room.
 pac.put_item(room2, item2, "Your charger is in the half-open drawer.")
 pac.put_item(room2, item4, "The remote is on the table.")
 
 pac.put_static_item(room2, static1)  # Description is not needed, it's the static objects display parameter
 static1.add_item_blueprint(item4, "You turn on the television with the remote.")
 
-pac.set_starting_message("'The Story of a Man' (demo)\n---------------------------\n\nYou are in the dining room. You can smell the scent of washed dishes.\nYour family is out for this evening.")
+pac.set_starting_message("'The Story of a Man' (demo)\n---------------------------\n\nYou are in the dining room."
+                         "You can smell the scent of washed dishes.\nYour family is out for this evening.")
 
 # Starts the game (blocking call)
 pac.start()

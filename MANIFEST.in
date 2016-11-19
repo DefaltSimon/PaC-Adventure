@@ -4,3 +4,4 @@ include requirements.txt
 include changes.txt
 
 recursive-include pac/examples *.py
+prune __pycache__/
