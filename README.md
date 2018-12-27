@@ -2,7 +2,7 @@
 ![MIT](https://img.shields.io/badge/license-MIT-yellow.svg)  
 A library for creating a text-based story.
 ---
-###Features include:
+### Features include:
 - Rooms, items, static objects
 - Inventory, "crafting" (called blueprints)
 - Requirements before specific actions can be done  
@@ -10,7 +10,8 @@ A library for creating a text-based story.
 - Event handling  
 - Music!  
 
-More coming in the future!  
+~More coming in the future!~  
+This project is being rewritten with a browser frontend, see [Amber](https://github.com/DefaultSimon/Amber)
 
 ---
 
